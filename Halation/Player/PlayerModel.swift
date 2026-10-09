@@ -37,6 +37,9 @@ final class PlayerModel {
     private(set) var isHDRPlaybackEligible = false
     private(set) var showsInfoPanel = false
     private(set) var scrubPreview: ScrubPreview?
+    /// False once the engine has answered a thumbnail request with nothing (the remux engine can't make stills yet),
+    /// so the scrub preview shows just the time instead of an empty box.
+    private(set) var scrubThumbnailsAvailable = true
 
     var chapters: [Chapter] { mediaInfo?.chapters ?? [] }
     var currentChapter: Chapter? {
@@ -163,6 +166,7 @@ final class PlayerModel {
         engine.volume = volume
         engine.isMuted = isMuted
         engine.audioOutputMode = audioOutputMode
+        engine.preferredAudioLanguage = preferences.audioLanguage
         engine.stretchesVideoToFrame = videoLayout.aspect != .auto
         isPictureInPictureAvailable = engine.isPictureInPictureAvailable
         isHDRPlaybackEligible = engine.isHDRPlaybackEligible
@@ -184,6 +188,7 @@ final class PlayerModel {
         scrubTask?.cancel()
         scrubPreview = nil
         scrubThumbnails = [:]
+        scrubThumbnailsAvailable = true
         showsInfoPanel = false
         isPictureInPictureAvailable = false
         isPictureInPictureActive = false
@@ -422,7 +427,12 @@ final class PlayerModel {
         guard cached == nil else { return }
         scrubTask = Task {
             let image = await engine.thumbnail(at: .seconds(Double(bucket) * step), maxSize: CGSize(width: 320, height: 180))
-            guard !Task.isCancelled, let image else { return }
+            guard !Task.isCancelled else { return }
+            guard let image else {
+                scrubThumbnailsAvailable = false
+                scrubPreview?.image = nil
+                return
+            }
             if scrubThumbnails.count > 200 { scrubThumbnails = [:] }
             scrubThumbnails[bucket] = image
             scrubPreview?.image = image

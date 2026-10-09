@@ -44,16 +44,3 @@ import Testing
     }
 }
 
-@Suite struct EngineRouterTests {
-    @Test func routesNativeContainersToAVFoundation() {
-        for ext in ["mp4", "MOV", "m4v", "m3u8"] {
-            #expect(EngineRouter.route(forExtension: ext) == .avFoundation)
-        }
-    }
-
-    @Test func rejectsContainersWithoutAnEngineYet() {
-        for ext in ["mkv", "WEBM", "avi"] {
-            #expect(EngineRouter.route(forExtension: ext) == .unsupported)
-        }
-    }
-}

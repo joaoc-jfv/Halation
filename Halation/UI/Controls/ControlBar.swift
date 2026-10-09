@@ -86,7 +86,11 @@ struct ControlBar: View {
         .frame(minWidth: 90)
         .overlay(alignment: .topLeading) {
             if let preview = player.scrubPreview {
-                ScrubPreviewView(preview: preview, chapter: ChapterNavigation.index(at: preview.time, in: player.chapters).map { player.chapters[$0].title })
+                ScrubPreviewView(
+                    preview: preview,
+                    chapter: ChapterNavigation.index(at: preview.time, in: player.chapters).map { player.chapters[$0].title },
+                    showsThumbnail: player.scrubThumbnailsAvailable
+                )
             }
         }
     }

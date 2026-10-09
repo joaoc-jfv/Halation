@@ -33,7 +33,7 @@ private struct EngineBoom: Error, LocalizedError {
 
     @Test func unsupportedContainersSayTheyAreNotSupportedYet() async {
         let player = PlayerModel(services: .testing())
-        player.open(URL(fileURLWithPath: "/Movies/film.mkv"))
+        player.open(URL(fileURLWithPath: "/Movies/film.avi"))
         await waitUntil("an error") { player.errorMessage != nil }
         #expect(player.errorMessage == "This format isn't supported yet.")
     }

@@ -4,6 +4,8 @@ import SwiftUI
 struct ScrubPreviewView: View {
     let preview: ScrubPreview
     var chapter: String?
+    /// False when the engine can't make stills: the card then shows only the time.
+    var showsThumbnail = true
 
     private let width: CGFloat = 176
     private var height: CGFloat { width * 9 / 16 }
@@ -11,16 +13,18 @@ struct ScrubPreviewView: View {
     var body: some View {
         GeometryReader { geometry in
             VStack(spacing: 4) {
-                ZStack {
-                    Rectangle().fill(.black.opacity(0.5))
-                    if let image = preview.image {
-                        Image(decorative: image, scale: 1)
-                            .resizable()
-                            .scaledToFill()
+                if showsThumbnail {
+                    ZStack {
+                        Rectangle().fill(.black.opacity(0.5))
+                        if let image = preview.image {
+                            Image(decorative: image, scale: 1)
+                                .resizable()
+                                .scaledToFill()
+                        }
                     }
+                    .frame(width: width, height: height)
+                    .clipShape(.rect(cornerRadius: 10))
                 }
-                .frame(width: width, height: height)
-                .clipShape(.rect(cornerRadius: 10))
                 VStack(spacing: 0) {
                     Text(preview.time.clockString).font(.callout.monospacedDigit().weight(.semibold))
                     if let chapter {
@@ -30,12 +34,12 @@ struct ScrubPreviewView: View {
                 .foregroundStyle(.white)
                 .shadow(color: .black.opacity(0.8), radius: 3)
             }
-            .frame(width: width)
+            .frame(width: showsThumbnail ? width : 120)
             .padding(6)
             .glassEffect(.regular.tint(.black.opacity(0.35)), in: .rect(cornerRadius: 16))
             .offset(
                 x: min(max(geometry.size.width * preview.fraction - width / 2, -80), geometry.size.width - width + 80),
-                y: -(height + 62)
+                y: showsThumbnail ? -(height + 62) : -56
             )
         }
         .allowsHitTesting(false)

@@ -71,7 +71,8 @@ final class LoopbackServer: @unchecked Sendable {
 
     private func accept(_ nwConnection: NWConnection) {
         let connection = Connection(nwConnection, token: token, provider: provider, queue: queue) { [weak self] closed in
-            self?.queue.async { self?.connections[ObjectIdentifier(closed)] = nil }
+            guard let server = self else { return }
+            server.queue.async { server.connections[ObjectIdentifier(closed)] = nil }
         }
         connections[ObjectIdentifier(connection)] = connection
         connection.start()

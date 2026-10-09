@@ -48,6 +48,9 @@ protocol PlaybackEngine: AnyObject {
     /// `false` keeps its own aspect ratio inside the frame.
     var stretchesVideoToFrame: Bool { get set }
 
+    /// Which audio track to start with, for engines that must pick one before playback starts (the remux engine).
+    var preferredAudioLanguage: String? { get set }
+
     var audioOutputMode: AudioOutputMode { get set }
     var capabilities: EngineCapabilities { get }
     func close()

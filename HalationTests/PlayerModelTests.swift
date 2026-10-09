@@ -93,7 +93,7 @@ import Testing
 
     @Test func rejectsUnsupportedContainers() async {
         let player = PlayerModel(services: .testing())
-        player.open(URL(fileURLWithPath: "/tmp/movie.mkv"))
+        player.open(URL(fileURLWithPath: "/tmp/movie.avi"))
         await wait("failure") { player.errorMessage != nil }
         #expect(player.errorMessage == "This format isn't supported yet.")
         #expect(player.videoView == nil)

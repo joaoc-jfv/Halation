@@ -296,6 +296,18 @@ private struct Rig {
         #expect(rig.fake.thumbnailRequests.count == count)
     }
 
+    @Test func anEngineThatCannotMakeStillsTurnsTheThumbnailOff() async throws {
+        let rig = Rig()  // the fake engine answers nil unless it is given an image
+        await rig.open()
+        #expect(rig.model.scrubThumbnailsAvailable)
+        rig.model.updateScrubPreview(fraction: 0.5)
+        await waitUntil("the engine to answer") { !rig.model.scrubThumbnailsAvailable }
+        #expect(rig.model.scrubPreview?.time == .seconds(500))  // the time still shows
+        #expect(rig.model.scrubPreview?.image == nil)
+        rig.model.close()
+        #expect(rig.model.scrubThumbnailsAvailable)  // the next file starts fresh
+    }
+
     @Test func clampsOutOfRangePositionsAndIgnoresUnknownDurations() {
         let model = PlayerModel(services: .testing())
         model.updateScrubPreview(fraction: 0.5)  // nothing loaded

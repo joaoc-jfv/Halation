@@ -34,6 +34,9 @@ final class AVFoundationEngine: PlaybackEngine {
         set { surface.videoGravity = newValue ? .resize : .resizeAspect }
     }
 
+    /// Unused here: AVFoundation exposes every audio track and the model picks.
+    var preferredAudioLanguage: String?
+
     var audioOutputMode: AudioOutputMode = .spatial {
         didSet { applyAudioOutputMode() }
     }

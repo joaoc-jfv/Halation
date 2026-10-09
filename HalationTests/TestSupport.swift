@@ -57,6 +57,7 @@ final class FakeEngine: PlaybackEngine {
     var isMuted = false
     var stretchesVideoToFrame = false
     var audioOutputMode: AudioOutputMode = .spatial
+    var preferredAudioLanguage: String?
     let capabilities = EngineCapabilities(supportsPictureInPicture: true, supportsDolbyVision: false, supportsSpatialAudio: false)
     var audioTracks: [MediaTrack] = []
     var subtitleTracks: [MediaTrack] = []
