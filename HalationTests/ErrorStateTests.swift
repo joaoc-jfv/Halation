@@ -31,11 +31,48 @@ private struct EngineBoom: Error, LocalizedError {
         #expect(player.videoView == nil)
     }
 
-    @Test func unsupportedContainersSayTheyAreNotSupportedYet() async {
-        let player = PlayerModel(services: .testing())
+    @Test func aFileEveryEngineRefusesSaysSo() async {
+        let first = FakeEngine(), second = FakeEngine()
+        first.loadError = PlaybackError.needsCompatibilityMode
+        second.loadError = PlaybackError.loadFailed("This file can't be played.")
+        let player = PlayerModel(services: .testing(), engineFactory: { _ in first }, compatibilityFactory: { _ in second })
         player.open(URL(fileURLWithPath: "/Movies/film.avi"))
         await waitUntil("an error") { player.errorMessage != nil }
-        #expect(player.errorMessage == "This format isn't supported yet.")
+        #expect(player.errorMessage == "This file can't be played.")
+        #expect(first.closed)  // the engine that gave up is released
+    }
+
+    @Test func aFileTheFirstEngineCannotPlayGoesToTheCompatibilityEngine() async {
+        let first = FakeEngine(), second = FakeEngine()
+        first.loadError = PlaybackError.needsCompatibilityMode
+        second.info = MediaInfo(container: "AVI", engineName: "mpv (compatibility mode)")
+        let player = PlayerModel(services: .testing(), engineFactory: { _ in first }, compatibilityFactory: { _ in second })
+        let url = URL(fileURLWithPath: "/Movies/film.avi")
+        player.open(url)
+        await waitUntil("playback on the second engine") { player.state == .playing }
+        #expect(second.loadedURLs == [url])
+        #expect(player.mediaInfo?.engineName == "mpv (compatibility mode)")
+        #expect(first.closed && !second.closed)
+        #expect(player.errorMessage == nil)
+    }
+
+    @Test func aFileAVFoundationCannotOpenIsRetriedToo() async {
+        let first = FakeEngine(), second = FakeEngine()
+        first.loadError = PlaybackError.notPlayable
+        let player = PlayerModel(services: .testing(), engineFactory: { _ in first }, compatibilityFactory: { _ in second })
+        player.open(URL(fileURLWithPath: "/Movies/film.mov"))
+        await waitUntil("playback on the second engine") { player.state == .playing }
+        #expect(player.errorMessage == nil)
+    }
+
+    @Test func otherLoadFailuresAreNotRetried() async {
+        let first = FakeEngine(), second = FakeEngine()
+        first.loadError = PlaybackError.loadFailed("The disk went away.")
+        let player = PlayerModel(services: .testing(), engineFactory: { _ in first }, compatibilityFactory: { _ in second })
+        player.open(URL(fileURLWithPath: "/Movies/film.mp4"))
+        await waitUntil("an error") { player.errorMessage != nil }
+        #expect(player.errorMessage == "The disk went away.")
+        #expect(second.loadedURLs.isEmpty)
     }
 
     @Test func aFailureDuringPlaybackShowsTheMessageAndStopsTheSleepAssertion() async {

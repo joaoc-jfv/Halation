@@ -6,6 +6,8 @@ import OSLog
 final class RemuxSession: @unchecked Sendable {
     struct Failure: Error, Equatable, LocalizedError {
         var message: String
+        /// Whether the compatibility engine might play what this one can't (a codec it has no way to copy or convert).
+        var retryWithCompatibilityEngine = false
         var errorDescription: String? { message }
     }
 
@@ -96,9 +98,9 @@ final class RemuxSession: @unchecked Sendable {
 
     /// Decides what to copy, or says why the file can't be played yet. Pure, so each refusal is tested.
     static func plan(for probe: MKVProbeResult, preferredAudioLanguage: String?, audioStreamID: Int? = nil) throws -> Plan {
-        guard let video = probe.video.first else { throw Failure(message: "This file has no video.") }
+        guard let video = probe.video.first else { throw Failure(message: "This file has no video.", retryWithCompatibilityEngine: true) }
         guard RemuxSupport.canCopyVideo(codec: video.codec) else {
-            throw Failure(message: "This file's video (\(video.codec.uppercased())) isn't supported yet.")
+            throw Failure(message: "This file's video (\(video.codec.uppercased())) isn't supported yet.", retryWithCompatibilityEngine: true)
         }
         var audio: ProbedStream?
         if !probe.audio.isEmpty {
@@ -106,12 +108,12 @@ final class RemuxSession: @unchecked Sendable {
                 ?? RemuxSupport.chooseAudio(from: probe.streams, preferredLanguage: preferredAudioLanguage)
             guard audio != nil else {
                 let names = Set(probe.audio.map { $0.codec.uppercased() }).sorted().joined(separator: ", ")
-                throw Failure(message: "This file's audio (\(names)) isn't supported yet.")
+                throw Failure(message: "This file's audio (\(names)) isn't supported yet.", retryWithCompatibilityEngine: true)
             }
         }
         let segments = SegmentPlanner.plan(keyframes: probe.keyframes, duration: probe.duration)
         guard !segments.isEmpty else {
-            throw Failure(message: "This file has no seek index, which isn't supported yet.")
+            throw Failure(message: "This file has no seek index, which isn't supported yet.", retryWithCompatibilityEngine: true)
         }
         return Plan(video: video, audio: audio, segments: segments)
     }
@@ -189,9 +191,6 @@ final class RemuxSession: @unchecked Sendable {
     }
 
     static func displayName(forCodec codec: String) -> String {
-        [
-            "h264": "H.264", "hevc": "HEVC", "eac3": "E-AC-3", "ac3": "AC-3", "aac": "AAC", "alac": "ALAC", "flac": "FLAC",
-            "dts": "DTS", "truehd": "TrueHD", "mlp": "MLP", "opus": "Opus", "vorbis": "Vorbis", "mp3": "MP3", "mp2": "MP2",
-        ][codec] ?? (codec.hasPrefix("pcm_") ? "PCM" : codec.uppercased())
+        CodecNames.displayName(forFFmpegCodec: codec)
     }
 }

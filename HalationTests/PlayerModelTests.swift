@@ -91,12 +91,11 @@ import Testing
         #expect(player.isMuted)
     }
 
-    @Test func rejectsUnsupportedContainers() async {
-        let player = PlayerModel(services: .testing())
-        player.open(URL(fileURLWithPath: "/tmp/movie.avi"))
-        await wait("failure") { player.errorMessage != nil }
-        #expect(player.errorMessage == "This format isn't supported yet.")
-        #expect(player.videoView == nil)
+    @Test func sendsLegacyContainersToTheCompatibilityEngine() throws {
+        let engine = try EngineRouter.engine(for: URL(fileURLWithPath: "/tmp/movie.avi"))
+        #expect(engine is MPVEngine)
+        engine.close()
+        #expect(try EngineRouter.engine(for: URL(fileURLWithPath: "/tmp/movie.mp4")) is AVFoundationEngine)
     }
 
     @Test func reportsMissingFiles() async {

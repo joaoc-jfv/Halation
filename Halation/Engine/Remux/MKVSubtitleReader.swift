@@ -13,7 +13,7 @@ enum MKVSubtitleReader {
 
     /// Short name for the track list: `SRT`, `ASS`.
     static func displayName(forCodec codec: String) -> String {
-        ["subrip": "SRT", "ass": "ASS", "ssa": "SSA", "webvtt": "WebVTT", "text": "Text"][codec] ?? codec.uppercased()
+        CodecNames.displayName(forFFmpegCodec: codec)
     }
 
     /// The text of one packet, ready for `SubtitleMarkup`. SubRip and WebVTT packets are the text itself; ASS packets are

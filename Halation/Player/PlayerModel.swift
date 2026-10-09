@@ -79,6 +79,7 @@ final class PlayerModel {
 
     @ObservationIgnored private let services: PlayerServices
     @ObservationIgnored private let engineFactory: EngineFactory
+    @ObservationIgnored private let compatibilityFactory: EngineFactory
     @ObservationIgnored private var preferences: Preferences { services.preferences }
     @ObservationIgnored private var folderAccess: FolderAccess { services.folderAccess }
     @ObservationIgnored private var resumeOfferTask: Task<Void, Never>?
@@ -104,10 +105,12 @@ final class PlayerModel {
 
     init(
         services: PlayerServices = .live(),
-        engineFactory: @escaping EngineFactory = EngineRouter.engine(for:)
+        engineFactory: @escaping EngineFactory = EngineRouter.engine(for:),
+        compatibilityFactory: @escaping EngineFactory = EngineRouter.compatibilityEngine(for:)
     ) {
         self.services = services
         self.engineFactory = engineFactory
+        self.compatibilityFactory = compatibilityFactory
         subtitles = SubtitleTrackStore(preferences: services.preferences, folderAccess: services.folderAccess)
         audioOutputMode = services.preferences.audioOutputMode
         services.nowPlaying.handlers = NowPlayingHandlers(
@@ -139,9 +142,17 @@ final class PlayerModel {
         if url.startAccessingSecurityScopedResource() { scopedURL = url }
 
         do {
-            let engine = try engineFactory(url)
+            var engine = try engineFactory(url)
             attach(engine)
-            try await engine.load(url, startAt: nil)
+            do {
+                try await engine.load(url, startAt: nil)
+            } catch let error as PlaybackError where error.wantsCompatibilityEngine {
+                // The first engine can't play this file; libmpv may be able to.
+                discardEngine()
+                engine = try compatibilityFactory(url)
+                attach(engine)
+                try await engine.load(url, startAt: nil)
+            }
             try Task.checkCancellation()
             applyTrackPreferences(to: engine)
             engine.play()
@@ -175,6 +186,21 @@ final class PlayerModel {
                 self?.handle(event)
             }
         }
+    }
+
+    /// Drops an engine that failed to load, before another is tried.
+    private func discardEngine() {
+        eventTask?.cancel()
+        eventTask = nil
+        engine?.close()
+        engine = nil
+        videoView = nil
+        mediaInfo = nil
+        audioTracks = []
+        subtitleTracks = []
+        selectedAudio = nil
+        selectedSubtitle = nil
+        state = .loading
     }
 
     private func teardown() {

@@ -232,6 +232,6 @@ private struct Clip {
 
     @Test func keepsTheRestWhereTheyWere() {
         for ext in ["mp4", "mov", "m4v", "m3u8"] { #expect(EngineRouter.route(forExtension: ext) == .avFoundation) }
-        for ext in ["avi", "wmv", "flv"] { #expect(EngineRouter.route(forExtension: ext) == .unsupported) }
+        for ext in ["avi", "wmv", "flv"] { #expect(EngineRouter.route(forExtension: ext) == .compatibility) }
     }
 }

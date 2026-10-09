@@ -76,7 +76,13 @@ final class FakeEngine: PlaybackEngine {
         emit(.timeChanged(time))
     }
 
+    /// When set, `load` throws it (an engine that refuses the file).
+    var loadError: (any Error)?
+    private(set) var loadedURLs: [URL] = []
+
     func load(_ url: URL, startAt: Duration?) async throws {
+        loadedURLs.append(url)
+        if let loadError { throw loadError }
         emit(.durationChanged(duration))
         emit(.mediaInfoChanged(info))
         emit(.tracksChanged)

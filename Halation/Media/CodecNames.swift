@@ -16,6 +16,21 @@ enum CodecNames {
         return names[cc] ?? cc
     }
 
+    /// Short name for a codec as FFmpeg and mpv spell it (`hevc`, `dts`, `subrip`); the uppercased name when unknown.
+    static func displayName(forFFmpegCodec codec: String) -> String {
+        if let name = ffmpegNames[codec] { return name }
+        return codec.hasPrefix("pcm_") ? "PCM" : codec.uppercased()
+    }
+
+    private static let ffmpegNames: [String: String] = [
+        "h264": "H.264", "hevc": "HEVC", "av1": "AV1", "vp9": "VP9", "vp8": "VP8", "mpeg4": "MPEG-4", "msmpeg4v3": "MPEG-4",
+        "mpeg2video": "MPEG-2", "mpeg1video": "MPEG-1", "vc1": "VC-1", "wmv3": "WMV", "wmv2": "WMV", "theora": "Theora", "prores": "ProRes",
+        "aac": "AAC", "ac3": "AC-3", "eac3": "E-AC-3", "alac": "ALAC", "flac": "FLAC", "dts": "DTS", "truehd": "TrueHD", "mlp": "MLP",
+        "opus": "Opus", "vorbis": "Vorbis", "mp3": "MP3", "mp2": "MP2", "wmav2": "WMA", "wmapro": "WMA Pro",
+        "subrip": "SRT", "srt": "SRT", "ass": "ASS", "ssa": "SSA", "webvtt": "WebVTT", "text": "Text", "mov_text": "Text",
+        "hdmv_pgs_subtitle": "PGS", "dvd_subtitle": "VobSub", "dvb_subtitle": "DVB",
+    ]
+
     private static let names: [String: String] = [
         "avc1": "H.264", "avc3": "H.264",
         "hvc1": "HEVC", "hev1": "HEVC", "dvh1": "HEVC", "dvhe": "HEVC",

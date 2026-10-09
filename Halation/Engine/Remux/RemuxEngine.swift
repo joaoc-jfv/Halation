@@ -57,6 +57,8 @@ final class RemuxEngine: PlaybackEngine {
         } catch is CancellationError {
             throw CancellationError()
         } catch {
+            // A codec this engine can't copy or convert is libmpv's job; say nothing and let the model hand the file over.
+            if (error as? RemuxSession.Failure)?.retryWithCompatibilityEngine == true { throw PlaybackError.needsCompatibilityMode }
             let failure = PlaybackError.loadFailed(error.localizedDescription)
             continuation.yield(.stateChanged(.failed(failure)))
             throw failure

@@ -3,13 +3,13 @@
 > **Halation** (n.): the soft glow that forms around bright highlights on film.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** Phase 1 (milestones 1.1 to 1.10) is done, the phase 2 spike is done, and milestones 2.1 (FFmpeg, `MKVProbe`, loopback server), 2.2 (`RemuxEngine`) and 2.3 (MKV tracks and thumbnails) and 2.4 (audio conversion, files without Cues) are done. Phase 1: Halation plays MP4, MOV and M4V with everything in §5 and §6. MKV and the other containers are phases 2 and 3 (opening one shows "This format isn't supported yet.").
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** Phase 1 (milestones 1.1 to 1.10) is done, the phase 2 spike is done, and milestones 2.1 (FFmpeg, `MKVProbe`, loopback server), 2.2 (`RemuxEngine`) and 2.3 (MKV tracks and thumbnails) and 2.4 (audio conversion, files without Cues) and 3.1 (libmpv groundwork and the compatibility engine) are done. Phase 1: Halation plays MP4, MOV and M4V with everything in §5 and §6. MKV and the other containers are phases 2 and 3 (opening one shows "This format isn't supported yet.").
 
 ---
 
 ## 0. Where things stand (read this first)
 
-*Written at the end of milestone 2.4 so work can continue from a fresh chat. Everything below is also true in the code and tests; the rest of this file is the design.*
+*Written at the end of milestone 3.1 so work can continue from a fresh chat. Everything below is also true in the code and tests; the rest of this file is the design.*
 
 ### State
 
@@ -21,22 +21,26 @@ This document is the full build plan. It is written so that an engineer (or anot
 | 2.2 `RemuxEngine` (MKV plays, HDR/DV, Spatial Audio, seeking) | **Done.** Verified on the real file, not just generated clips. |
 | 2.3 Tracks: audio switching, MKV subtitles, thumbnails | **Done.** Verified on the real file (see 2.3 notes). |
 | 2.4 Audio conversion, files without Cues | **Done** (see 2.4 notes). Hardening items still open are listed below. |
-| Phase 3 (mpv fallback), Phase 4 | Not started. |
+| Phase 3 spike (`Spikes/MPVSpike/`) | **Done.** libmpv plays the real 4K DV file with hardware decoding and HDR passthrough. |
+| 3.1 libmpv groundwork, `MPVEngine`, fallback routing | **Done** (see 3.1 notes). |
+| **3.2 mpv polish (next)**, 3.3 | Not started. Details below. |
+| Phase 4 | Not started. |
 
-309 tests pass (`xcodebuild … test`). The Release app is 41 MB (FFmpeg is ~31 MB of that). One commit per milestone; `git log` is the history.
+322 tests pass (`xcodebuild … test`). The Release app is 93 MB (universal binary; before libmpv it was 41 MB). One commit per milestone; `git log` is the history.
 
 ### To start a session
 1. Read `CLAUDE.md`, this section, §7 Phase 2, and `Spikes/MKVRemux/README.md`.
 2. `xcodegen generate && xcodebuild -scheme Halation -destination 'platform=macOS' test`. The first build downloads the FFmpeg binaries (~100 MB).
 3. `TestMedia/` (gitignored, never commit) holds one real file for manual checks: a 3840×1920 HEVC Dolby Vision profile 8.1 MKV, 55 minutes, 10.6 GB, two E-AC-3 5.1 JOC audio tracks (Italian first and default, then English), and 46 SRT subtitle tracks (including Forced and SDH). Open it with `open -a <built Halation.app> <file>`.
 
-### Next: what is left of phase 2
-Milestones 2.1–2.4 are done; what remains is a hardening list, in rough order of value:
-- **AV1**: needs `av1C` codec strings in `HLSPlaylists` and a hardware-support check; untested for lack of a file. VP9/MPEG-2/etc. belong to phase 3 (they still fail with "This file's video (VP9) isn't supported yet.").
-- **Big files without Cues**: the keyframe scan works (tested on small files), but a 10 GB file without an index has not been tried: the scan reads the whole file, and the muxer's seeks on an index-less file may be slow. If it is, pass the scanned positions to the muxer's input (`av_add_index_entry`).
-- **Converted audio on real files**: only generated PCM was exercised (the real test file has E-AC-3 only). DTS, TrueHD and Opus go through the same code with a different decoder, but nothing real has been played; listen for the click at the one boundary after a seek (the converter starts cold there).
-- HDR10+, `Timestamps are unset in a packet` warnings from the muxer (harmless so far), files whose first video pts isn't 0, variable frame rate, multiple video tracks, memory under many seeks, CPU on 8K.
-- CPU while playing the real 4K Dolby Vision file measured 15–20% of one core in a Release build (`top`), against 8–10% recorded in 2.2 (method unknown); a `sample` of the process shows Halation's own threads almost entirely idle, so the load is in CoreMedia/the system. The "<~10%" target is not confirmed.
+### Next: milestone 3.2 (the compatibility engine, finished)
+`MPVEngine` plays and is routed to (3.1). What it still lacks, in order:
+- **Subtitles.** mpv draws subtitles itself (`sub-visibility`), so ASS styling and PGS/VobSub show, but: the model's `drawsSubtitles` is false for mpv tracks, so **Z/X delay does nothing for them** (map to `sub-delay`), the subtitle style preferences (size, background, position) aren't applied to mpv (`sub-font-size`, `sub-back-color`, `sub-pos`...), and sidecar files are the app's own overlay (fine, but libass could do them: `sub-add`). Remembered language/forced rules already work through `TrackSelectionPolicy`, since the engine lists tracks as `MediaTrack`s.
+- **Audio.** Stereo mode sets `audio-channels=stereo`; Spatial mode lets mpv's `coreaudio` output carry the file's own layout and the tracks are never flagged `isSpatial`, so no Spatial Audio badge and no system spatialization. mpv 0.41 has `--ao=avfoundation` (AVSampleBufferAudioRenderer), which may allow `allowedAudioSpatializationFormats`; untested. DTS-HD and TrueHD decode in libavcodec as multichannel PCM.
+- **Thumbnails** (scrub previews, posters, Now Playing artwork): `thumbnail` returns nil, so previews show only the time. mpv's `screenshot-raw` only gives the current frame; a second decode path (libavcodec/VideoToolbox from `FFmpegKit`) is the likely answer.
+- **Crop/aspect** work (the view is sized inside the clipping container, `keepaspect` for overrides), but only checked on a still pattern; Picture in Picture is unavailable (the button is hidden).
+- **Dolby Vision** shows as tone-mapped HDR10 (`MPVMapping.hdr` can't see the profile); resume/Now Playing/chapters go through the model unchanged but chapters were not exercised on a real file.
+- Then: tests with real legacy files (VP9, DTS, ASS, PGS — none could be generated), a CPU/memory check of the mpv path on the real 4K file, and the phase 2 hardening list (AV1, big files without Cues, converted audio on a real file, HDR10+).
 
 ### Known gaps and things not verified
 - **Not verified by eye or ear (needs a person):** Dolby Vision actually switching the display into DV mode; how the JOC track sounds on AirPods; HDR brightness on screen. The data path (tags, sample entries, flags, pixel format) is verified.
@@ -47,7 +51,7 @@ Milestones 2.1–2.4 are done; what remains is a hardening list, in rough order 
 ### Decisions that belong to the owner
 - **License for Halation** (§9 item 7). FFmpeg is linked **statically under the LGPL**, so users must be able to relink; open-sourcing is the simplest answer. Needed before shipping phase 2.
 - "Dolby Vision" is used as the descriptive name (decided in 1.9, one place: `HDRFormat.badge`). "Dolby Atmos" is never shown; a test checks it.
-- FFmpeg comes from MPVKit's release assets, whose README says it is lightly maintained. We use only its prebuilt binaries via `Packages/FFmpegKit`. AetherEngine (a library that already does this whole job) is the fallback or reference.
+- FFmpeg and libmpv come from MPVKit's release assets, whose README says it is lightly maintained. `Packages/FFmpegKit` now depends on the `MPVKit` package (LGPL variant, pinned to 1.1.0-n9.0.2) and links its static libraries explicitly. AetherEngine (a library that already does this whole job) is the fallback or reference.
 
 ### Gotchas learned the hard way
 - **`project.yml` is the source of truth** for the Xcode project, the Info.plist and the **entitlements**. XcodeGen rewrites `Halation.entitlements` from `entitlements.properties`; for milestones 1.1–1.5 it was regenerated empty and the app ran unsandboxed. Run `xcodegen generate` after adding or removing files.
@@ -377,6 +381,14 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 - **Converted audio.** Audio AVPlayer can't play but FFmpeg can decode (DTS, TrueHD, Opus, Vorbis, MP3, PCM, ...; `RemuxSupport.canTranscodeAudio` asks libavcodec) is decoded and re-encoded as **AAC** by `AudioTranscoder`: stereo 192 kb/s, 5.1 384 kb/s, anything wider mixed down to 5.1, rates above 48 kHz resampled to 48 kHz. **Correction to the plan: this FFmpeg build has no AC-3/E-AC-3 encoder** (only `aac`, `aac_at`, `alac`, `flac` and PCM), so E-AC-3 output was never possible; FLAC was not tried in HLS. The converter lives in the muxer and keeps its decoder/encoder state from segment to segment, so playing straight on is seamless (verified: packets contiguous, decodes back to the original sine with no dropouts or repeats). A seek rebuilds it (`resumeTime` != the next segment's start). The encoder's first frame is stamped one `initial_padding` late so its packets start on time and no edit list is needed. Tracks that play as they are beat convertible ones in the same language (an AC-3 core beats TrueHD); the info panel shows `DTS → AAC`; the track list keeps the source codec. Tests use a generated PCM track (`MKVFixture.Options.pcmAudio`), which must be interleaved with the video like a real file (a first version wrote it all up front and the cutter, correctly, ignored audio before the first video keyframe).
 - **Files without Cues.** `RemuxSession.start` scans the file for keyframes (`MKVProbe.scanKeyframes`, one pass over the whole file) when the probe has no usable index. Caveat found on the way: `isCompleteIndex` accepts an index that ends within 30 s of the end, so on a file shorter than a minute a partial index can pass (the segments are then just longer; harmless).
 - **Error states.** Unsupported audio now only refuses a codec nothing can decode (`This file's audio (X) isn't supported yet.`).
+3.1 notes (done; checked in the real app on a generated MPEG-4 Matroska file; the real test file still goes through the remuxer):
+- **Dependency, with its reason.** libmpv is the only way to play what AVFoundation and the remuxer can't (AVI/MPEG-4/VP9/WMV, DTS-HD, ASS and PGS subtitles). `Packages/FFmpegKit` now depends on the remote `MPVKit` package at 1.1.0-n9.0.2 (the plain LGPL `MPVKit` product) instead of pinning four FFmpeg binaries itself: the `Libavcodec/avformat/avutil/swresample` checksums are identical, so there is still one FFmpeg. The package exports `Libmpv` too (`import FFmpegKit`). Xcode links only what a target names, so Libmpv, Libavfilter/Avdevice/Swscale, Libass, freetype/fribidi/harfbuzz/unibreak, Libplacebo, Libdovi, shaderc, MoltenVK (a plain `.a`, linked with `-lMoltenVK`), lcms2, uchardet, bluray, luajit, ssl/crypto, gnutls/nettle/hogweed/gmp, dav1d and uavs3d are listed in the package's linker settings. First resolve downloads ~1.9 GB (all platform slices); the **Release app is 93 MB** (was 41 MB).
+- **Spike** (`Spikes/MPVSpike/README.md`): HDR passthrough works with `target-colorspace-hint=yes` set before `mpv_initialize`; without it mpv tone-maps to SDR.
+- **Shape.** `MPVHandle` (thin wrapper: options, properties, commands, an event thread feeding an `AsyncStream`), `MPVVideoView` (a `CAMetalLayer` that mpv draws into through `wid`, `vo=gpu-next`, `gpu-api=vulkan`, `gpu-context=moltenvk`, `hwdec=videotoolbox`), `MPVEngine` (the `PlaybackEngine`), `MPVMapping` (pure: tracks, colour names, containers). mpv starts paused (`pause=yes`) and `keep-open=yes`; the end of the file is `eof-reached`, not an event. Time events are thinned to ~4 a second.
+- **Routing.** `EngineRouter` sends `avi`, `wmv`, `asf`, `flv`, `ogv`, `ogm`, `rm`, `rmvb`, `divx`, `xvid` straight to mpv. Any other file an engine can't play is retried there by `PlayerModel`: `PlaybackError.needsCompatibilityMode` (thrown by `RemuxEngine` for a video codec it can't copy, audio nothing can decode, no video, or no index even after scanning) and `.notPlayable` (AVFoundation). Other failures are not retried. If mpv fails too, its message is shown ("This file can't be played").
+- **Deadlock found only in the real app.** mpv's video thread set `wantsExtendedDynamicRangeContent` with `DispatchQueue.main.sync` (as MPVKit's demo does) while the main thread waited for mpv's core in `mpv_get_property_string`: the window froze. The setter now uses `main.async`. Unit tests could not show this (no window); launch the real app for any change near the layer or mpv's threads.
+- Language codes: Matroska/AVI use ISO 639-2/B (`fre`, `ger`, `chi`), which Foundation doesn't map; `LanguageMatching` now does.
+- Tests: `LegacyFixture` makes MPEG-4 video in Matroska or MPEG-TS with FFmpeg's own encoder (this build has **no AVI muxer** and no VP9/DTS encoders, so those can't be generated). They play through `MPVEngine` in the test host, including pause, seek and the end; fallback routing is tested with fake engines.
 - **Spike done** (`Spikes/MKVRemux/, see its README): the approach below works on a real 4K Dolby Vision 8.1 + E-AC-3 JOC MKV, with two changes to the original plan. The transport is a **loopback HTTP server**, because `AVAssetResourceLoader` cannot feed HLS media (`-12881`). And every segment is cut by seeking and **using a fresh muxer, then rewriting `tfdt`**, with one init shared by all segments.
 - Add FFmpeg libraries. The spike used MPVKit `1.1.0-n9.0.2` (FFmpeg n9, LGPL, static). Its README says it is "only suitable for learning" and "will not be maintained too frequently" (it did ship a release on 2026-10-07). Options for the real build: depend on MPVKit's FFmpeg binary targets only (Libavformat, Libavcodec, Libavutil, pinned by checksum), or depend on AetherEngine, which already implements this whole architecture (LGPL-3.0 with an App Store exception) and could be used as a dependency or as a reference.
 - `MKVProbe`: read tracks, codecs, cues (keyframe index), chapters, and attachments with libavformat.
@@ -392,7 +404,8 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 *Risk note:* this is the hardest part of the project. Prototype it as a standalone spike first: one MKV, one segment, played in AVPlayer. Confirm the approach before building it out.
 
 ### Phase 3 — mpv fallback engine
-- `MPVEngine` using libmpv's render API, drawing into an EDR-enabled layer (`wantsExtendedDynamicRangeContent`). IINA's open-source code is a useful reference for the render loop, EDR, and event handling. IINA is GPLv3, so read it for ideas, don't copy code unless we go GPL.
+*Status: 3.1 done (engine core, routing, dependency); 3.2 is the polish list in "Where things stand".*
+- `MPVEngine` using libmpv, drawing through `wid` into an EDR-enabled `CAMetalLayer` (Vulkan on Metal; done in 3.1; the render API was not needed). IINA's open-source code is a useful reference for the render loop, EDR, and event handling. IINA is GPLv3, so read it for ideas, don't copy code unless we go GPL.
 - Map mpv properties to the protocol: `pause`, `time-pos`, `duration`, `speed`, `volume`, `aid`, `sid`, `track-list`, `video-crop`/`video-aspect-override`, `sub-delay`.
 - ASS/SSA styled subtitles and PGS image subtitles through libass/mpv. Optionally reuse libass for remuxed MKVs too.
 - "Compatibility mode" label in the info HUD; DV shows as "HDR (tone-mapped)".

@@ -14,12 +14,18 @@ enum PlaybackState: Equatable, Sendable {
 enum PlaybackError: Error, Equatable, Sendable, LocalizedError {
     case unsupportedFormat
     case notPlayable
+    /// This engine can't play the file, but the compatibility engine (libmpv) may; not shown to the user unless that fails too.
+    case needsCompatibilityMode
     case loadFailed(String)
+
+    /// Whether `PlayerModel` should retry the file with the compatibility engine.
+    var wantsCompatibilityEngine: Bool { self == .needsCompatibilityMode || self == .notPlayable }
 
     var errorDescription: String? {
         switch self {
         case .unsupportedFormat: "This format isn't supported yet."
         case .notPlayable: "This file can't be played."
+        case .needsCompatibilityMode: "This format isn't supported yet."
         case .loadFailed(let reason): reason
         }
     }

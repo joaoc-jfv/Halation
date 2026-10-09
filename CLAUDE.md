@@ -6,7 +6,7 @@ Free macOS video player (SwiftUI + Liquid Glass, macOS 26+) with HDR/Dolby Visio
 
 ## Rules
 - User-facing text says **"Spatial Audio"**, never "Dolby Atmos". In code, call the codec `E-AC-3 JOC`.
-- Dependencies: Apple frameworks, plus FFmpeg (LGPL, static) through the local package `Packages/FFmpegKit` for MKV remuxing. Anything else needs a reason recorded in `PLAN.md`.
+- Dependencies: Apple frameworks, plus FFmpeg and libmpv (LGPL, static, from MPVKit) through the local package `Packages/FFmpegKit`: FFmpeg for MKV remuxing, libmpv for the compatibility engine. Anything else needs a reason recorded in `PLAN.md`.
 - No `AVVideoComposition` or Core Image in the normal playback path, because it breaks HDR/DV. Crop by sizing the `AVPlayerLayer` inside a clipping container.
 - Swift 6 strict concurrency, `@Observable`, `@MainActor` for UI types, async AVFoundation `load(...)` APIs. Closures that the system calls on its own queue (MediaPlayer, etc.) must be created in `nonisolated` functions.
 - The UI talks only to `PlayerModel`. Engine details stay in `Engine/`.
