@@ -63,6 +63,11 @@ final class FakeEngine: PlaybackEngine {
     var subtitleTracks: [MediaTrack] = []
     var selectedAudioTrack: MediaTrack?
     var selectedSubtitleTrack: MediaTrack?
+    var drawsSubtitlesNatively = false
+    private(set) var subtitleDelays: [Duration] = []
+    private(set) var subtitleStyles: [SubtitleStyle] = []
+    private(set) var subtitleLifts: [Double] = []
+    private(set) var addedSubtitleFiles: [URL] = []
 
     init() {
         (events, continuation) = AsyncStream.makeStream(of: PlaybackEvent.self)
@@ -93,6 +98,20 @@ final class FakeEngine: PlaybackEngine {
     func pause() { isPlaying = false; emit(.stateChanged(.paused)) }
     func seek(to time: Duration, precise: Bool) async { seeks.append(time); advance(to: time) }
     func step(frames: Int) {}
+    func setSubtitleDelay(_ delay: Duration) { subtitleDelays.append(delay) }
+    func setSubtitleStyle(_ style: SubtitleStyle) { subtitleStyles.append(style) }
+    func setSubtitleLift(_ fraction: Double) { subtitleLifts.append(fraction) }
+    func addExternalSubtitle(_ url: URL, title: String?, language: String?) -> MediaTrack? {
+        guard drawsSubtitlesNatively else { return nil }
+        addedSubtitleFiles.append(url)
+        let track = MediaTrack(
+            id: "subtitle-\(100 + addedSubtitleFiles.count)", kind: .subtitle, language: language, title: title, codec: "ASS",
+            channels: nil, isDefault: false, isForced: false, isSpatial: false
+        )
+        subtitleTracks.append(track)
+        emit(.tracksChanged)
+        return track
+    }
     func selectAudio(_ track: MediaTrack?) { selectedAudioTrack = track }
     func selectSubtitle(_ track: MediaTrack?) { selectedSubtitleTrack = track }
     func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage? {

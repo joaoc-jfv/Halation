@@ -14,10 +14,11 @@ final class MPVEngine: PlaybackEngine {
     var videoView: NSView { view }
 
     private var mpv: MPVHandle?
+    private var thumbnailer: MPVThumbnailer?
     private var consuming: Task<Void, Never>?
     private var loadWaiter: CheckedContinuation<Void, any Error>?
     private var restartWaiters: [CheckedContinuation<Void, Never>] = []
-    private var lastErrorLog: String?
+    private(set) var lastErrorLog: String?
     private static let log = Logger(subsystem: "com.joaocadide.nitpicker", category: "mpv")
 
     private var state: PlaybackState = .idle
@@ -27,16 +28,25 @@ final class MPVEngine: PlaybackEngine {
     private var lastTimeEmitted: Double?
     private var lastBufferedEmitted: Double?
     private var lastInfo: MediaInfo?
+    /// The file's own HDR format, read by libavformat: mpv's properties can't tell Dolby Vision from HDR10.
+    private var sourceHDR: HDRFormat?
 
     private(set) var audioTracks: [MediaTrack] = []
     private(set) var subtitleTracks: [MediaTrack] = []
     private var trackFields: [MPVMapping.TrackFields] = []
 
     var preferredAudioLanguage: String?
+    /// For tests that read mpv's own properties back.
+    var handleForTesting: MPVHandle? { mpv }
     private var storedRate: Float = 1
     private var storedVolume: Float = 1
     private var storedMuted = false
     private var stretches = false
+    private var storedSubtitleDelay: Duration = .zero
+    private var storedSubtitleStyle = SubtitleStyle()
+    private var storedSubtitleLift = 0.06
+    /// mpv's track id for each sidecar file already added, so adding one twice reuses the track.
+    private var addedSubtitleIDs: [String: Int] = [:]
 
     init() {
         (events, continuation) = AsyncStream.makeStream(of: PlaybackEvent.self)
@@ -65,6 +75,7 @@ final class MPVEngine: PlaybackEngine {
             throw failure
         }
         mpv = handle
+        thumbnailer = MPVThumbnailer(path: url.path)
         for name in ["time-pos", "duration", "pause", "eof-reached", "paused-for-cache", "track-list", "video-params", "chapter-list", "demuxer-cache-time"] {
             handle.observe(name)
         }
@@ -72,6 +83,8 @@ final class MPVEngine: PlaybackEngine {
         handle.set("volume", double: Double(storedVolume) * 100)
         handle.set("mute", flag: storedMuted)
         handle.set("keepaspect", flag: !stretches)
+        handle.set("sub-delay", double: storedSubtitleDelay.seconds)
+        applySubtitleStyle(to: handle)
         let stream = handle.events
         consuming = Task { [weak self] in
             for await event in stream { self?.handle(event) }
@@ -128,6 +141,8 @@ final class MPVEngine: PlaybackEngine {
         consuming?.cancel()
         consuming = nil
         resumeRestartWaiters()
+        thumbnailer?.close()
+        thumbnailer = nil
         let handle = mpv
         mpv = nil
         // Destroying waits for mpv's threads, one of which may be waiting on the main thread.
@@ -144,6 +159,7 @@ final class MPVEngine: PlaybackEngine {
             isLoaded = true
             refreshTracks()
             refreshMediaInfo()
+            probeSourceHDR()
             if let duration = mpv?.double("duration"), duration > 0 { emit(.durationChanged(.seconds(duration))) }
             refreshState()
             resumeLoad(with: nil)
@@ -296,7 +312,48 @@ final class MPVEngine: PlaybackEngine {
         didSet { mpv?.set("audio-channels", string: audioOutputMode == .stereo ? "stereo" : "auto-safe") }
     }
 
-    func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage? { nil }
+    /// mpv can only capture the frame on screen, so stills come from a second decode path (see `MPVThumbnailer`).
+    func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage? {
+        await thumbnailer?.thumbnail(at: time, maxSize: maxSize)
+    }
+
+    // MARK: Subtitles
+
+    var drawsSubtitlesNatively: Bool { true }
+
+    func setSubtitleDelay(_ delay: Duration) {
+        storedSubtitleDelay = delay
+        mpv?.set("sub-delay", double: delay.seconds)
+    }
+
+    func setSubtitleStyle(_ style: SubtitleStyle) {
+        storedSubtitleStyle = style
+        if let mpv { applySubtitleStyle(to: mpv) }
+    }
+
+    func setSubtitleLift(_ fraction: Double) {
+        storedSubtitleLift = fraction
+        mpv?.set("sub-pos", string: "\(MPVMapping.subtitlePosition(lift: fraction))")
+    }
+
+    private func applySubtitleStyle(to handle: MPVHandle) {
+        for (name, value) in MPVMapping.subtitleProperties(for: storedSubtitleStyle) { handle.set(name, string: value) }
+        handle.set("sub-pos", string: "\(MPVMapping.subtitlePosition(lift: storedSubtitleLift))")
+    }
+
+    func addExternalSubtitle(_ url: URL, title: String?, language: String?) -> MediaTrack? {
+        guard let mpv, isLoaded else { return nil }
+        if let id = addedSubtitleIDs[url.path], let existing = subtitleTracks.first(where: { MPVMapping.mpvID(of: $0) == id }) { return existing }
+        let known = Set(trackFields.filter { $0.type == "sub" }.map(\.id))
+        // "auto" adds the track without choosing it (the app picks by the user's language); a new entry for every call.
+        var arguments = ["sub-add", url.path, "auto", title ?? url.deletingPathExtension().lastPathComponent]
+        if let language { arguments.append(language) }
+        if mpv.command(arguments) != nil { return nil }
+        refreshTracks()
+        guard let added = trackFields.last(where: { $0.type == "sub" && !known.contains($0.id) }) else { return nil }
+        addedSubtitleIDs[url.path] = added.id
+        return MPVMapping.mediaTrack(added)
+    }
 
     // MARK: Tracks
 
@@ -351,6 +408,16 @@ final class MPVEngine: PlaybackEngine {
 
     // MARK: Media info
 
+    private func probeSourceHDR() {
+        guard let path = mpv?.string("path") else { return }
+        Task { [weak self] in
+            let format = await Task.detached(priority: .utility) { MPVSourceProbe.hdrFormat(atPath: path) }.value
+            guard let self, mpv != nil, let format, format != sourceHDR else { return }
+            sourceHDR = format
+            refreshMediaInfo()
+        }
+    }
+
     private func refreshMediaInfo() {
         guard let mpv, isLoaded else { return }
         var info = MediaInfo(container: MPVMapping.containerName(mpv.string("file-format")), engineName: "mpv (compatibility mode)")
@@ -367,6 +434,7 @@ final class MPVEngine: PlaybackEngine {
         info.frameRate = mpv.double("container-fps") ?? mpv.double("estimated-vf-fps")
         let gamma = mpv.string("video-params/gamma")
         info.hdr = MPVMapping.hdr(gamma: gamma)
+        info.hdrNote = MPVMapping.hdrNote(source: sourceHDR, shown: info.hdr)
         info.colorPrimaries = ColorDescription.coreMediaPrimaries(fromFFmpeg: MPVMapping.ffmpegPrimaries(mpv.string("video-params/primaries")))
         info.transferFunction = ColorDescription.coreMediaTransfer(fromFFmpeg: MPVMapping.ffmpegTransfer(gamma))
         if let duration = mpv.double("duration"), duration > 0, let size = mpv.double("file-size") ?? mpv.double("stream-end") {

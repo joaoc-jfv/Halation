@@ -3,4 +3,5 @@
 @_exported import Libavformat
 @_exported import Libavutil
 @_exported import Libswresample
+@_exported import Libswscale
 @_exported import Libmpv

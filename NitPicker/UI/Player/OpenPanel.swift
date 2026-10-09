@@ -19,8 +19,8 @@ enum OpenPanel {
         let panel = NSOpenPanel()
         panel.allowsMultipleSelection = false
         panel.canChooseDirectories = false
-        panel.message = "Choose a subtitle file (SRT or WebVTT)"
-        panel.allowedContentTypes = SubtitleLoader.supportedExtensions.sorted().compactMap { UTType(filenameExtension: $0) }
+        panel.message = "Choose a subtitle file (SRT, WebVTT, ASS or SSA)"
+        panel.allowedContentTypes = SubtitleLoader.supportedExtensions.union(SidecarSubtitles.nativeExtensions).sorted().compactMap { UTType(filenameExtension: $0) }
         panel.begin { response in
             guard response == .OK, let url = panel.url else { return }
             handler(url)

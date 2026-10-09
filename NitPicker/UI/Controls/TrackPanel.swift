@@ -80,7 +80,7 @@ struct TrackPanel: View {
                     player.requestSidecarFolderAccess()
                 }
             }
-            if player.drawsSubtitles {
+            if player.canDelaySubtitles {
                 Text("Delay \(player.subtitles.delayLabel) · Z / X to adjust")
                     .font(.caption)
                     .foregroundStyle(.secondary)

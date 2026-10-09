@@ -5,7 +5,7 @@ struct SubtitleSettingsView: View {
     @Environment(PlayerModel.self) private var player
 
     private var style: Binding<SubtitleStyle> {
-        Binding(get: { player.subtitles.style }, set: { player.subtitles.setStyle($0) })
+        Binding(get: { player.subtitles.style }, set: { player.setSubtitleStyle($0) })
     }
 
     var body: some View {

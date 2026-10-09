@@ -151,22 +151,26 @@ final class MPVHandle: @unchecked Sendable {
         } ?? nil
     }
 
-    func set(_ name: String, flag value: Bool) {
-        _ = withHandle { handle in
+    @discardableResult
+    func set(_ name: String, flag value: Bool) -> Bool {
+        withHandle { handle in
             var flag: Int32 = value ? 1 : 0
-            return mpv_set_property(handle, name, MPV_FORMAT_FLAG, &flag)
-        }
+            return mpv_set_property(handle, name, MPV_FORMAT_FLAG, &flag) >= 0
+        } ?? false
     }
 
-    func set(_ name: String, double value: Double) {
-        _ = withHandle { handle in
+    @discardableResult
+    func set(_ name: String, double value: Double) -> Bool {
+        withHandle { handle in
             var number = value
-            return mpv_set_property(handle, name, MPV_FORMAT_DOUBLE, &number)
-        }
+            return mpv_set_property(handle, name, MPV_FORMAT_DOUBLE, &number) >= 0
+        } ?? false
     }
 
-    func set(_ name: String, string value: String) {
-        _ = withHandle { mpv_set_property_string($0, name, value) }
+    /// Returns whether mpv accepted the value.
+    @discardableResult
+    func set(_ name: String, string value: String) -> Bool {
+        withHandle { mpv_set_property_string($0, name, value) >= 0 } ?? false
     }
 
     // MARK: Commands
@@ -181,6 +185,52 @@ final class MPVHandle: @unchecked Sendable {
         }
         guard let code, code < 0 else { return nil }
         return Self.message(code)
+    }
+
+    /// One captured frame, 8-bit BGR with an unused fourth byte.
+    struct RawFrame {
+        var width: Int
+        var height: Int
+        var stride: Int
+        var bytes: [UInt8]
+    }
+
+    /// The frame on screen as raw pixels (`flags` is mpv's: `video`, `subtitles`, `window`). This build of FFmpeg has no image
+    /// encoders, so `screenshot-to-file` can't be used; the raw command needs none.
+    func screenshotRaw(_ flags: String = "video") -> RawFrame? {
+        withHandle { handle -> RawFrame? in
+            let words = ["screenshot-raw", flags].map { strdup($0) }
+            defer { words.forEach { free($0) } }
+            var values = words.map { mpv_node(u: .init(string: $0), format: MPV_FORMAT_STRING) }
+            var result = mpv_node()
+            let code: Int32 = values.withUnsafeMutableBufferPointer { buffer in
+                var list = mpv_node_list(num: Int32(buffer.count), values: buffer.baseAddress, keys: nil)
+                return withUnsafeMutablePointer(to: &list) { listPointer in
+                    var arguments = mpv_node(u: .init(list: listPointer), format: MPV_FORMAT_NODE_ARRAY)
+                    return mpv_command_node(handle, &arguments, &result)
+                }
+            }
+            guard code >= 0, result.format == MPV_FORMAT_NODE_MAP, let map = result.u.list else { return nil }
+            defer { mpv_free_node_contents(&result) }
+            var width = 0, height = 0, stride = 0
+            var bytes: [UInt8]?
+            for index in 0..<Int(map.pointee.num) {
+                guard let key = map.pointee.keys[index].map({ String(cString: $0) }) else { continue }
+                let node = map.pointee.values[index]
+                switch key {
+                case "w": width = Int(node.u.int64)
+                case "h": height = Int(node.u.int64)
+                case "stride": stride = Int(node.u.int64)
+                case "data":
+                    if node.format == MPV_FORMAT_BYTE_ARRAY, let array = node.u.ba {
+                        bytes = Array(UnsafeBufferPointer(start: array.pointee.data.assumingMemoryBound(to: UInt8.self), count: array.pointee.size))
+                    }
+                default: break
+                }
+            }
+            guard let bytes, width > 0, height > 0 else { return nil }
+            return RawFrame(width: width, height: height, stride: stride, bytes: bytes)
+        } ?? nil
     }
 
     static func message(_ code: Int32) -> String {

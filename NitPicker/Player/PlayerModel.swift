@@ -36,6 +36,8 @@ final class PlayerModel {
     private(set) var isPictureInPictureActive = false
     private(set) var isHDRPlaybackEligible = false
     private(set) var showsInfoPanel = false
+    /// The engine draws subtitles itself (mpv), so the delay and the lift above the controls go to it.
+    private(set) var enginePaintsSubtitles = false
     private(set) var scrubPreview: ScrubPreview?
     /// False once the engine has answered a thumbnail request with nothing (the engine has no picture to give),
     /// so the scrub preview shows just the time instead of an empty box.
@@ -179,6 +181,9 @@ final class PlayerModel {
         engine.audioOutputMode = audioOutputMode
         engine.preferredAudioLanguage = preferences.audioLanguage
         engine.stretchesVideoToFrame = videoLayout.aspect != .auto
+        enginePaintsSubtitles = engine.drawsSubtitlesNatively
+        engine.setSubtitleStyle(subtitles.style)
+        engine.setSubtitleDelay(subtitles.delay)
         isPictureInPictureAvailable = engine.isPictureInPictureAvailable
         isHDRPlaybackEligible = engine.isHDRPlaybackEligible
         eventTask = Task { [weak self] in
@@ -195,6 +200,7 @@ final class PlayerModel {
         engine?.close()
         engine = nil
         videoView = nil
+        enginePaintsSubtitles = false
         mediaInfo = nil
         audioTracks = []
         subtitleTracks = []
@@ -226,6 +232,7 @@ final class PlayerModel {
         engine?.close()
         engine = nil
         videoView = nil
+        enginePaintsSubtitles = false
         videoLayout = VideoLayout()
         scopedURL?.stopAccessingSecurityScopedResource()
         scopedURL = nil
@@ -599,6 +606,18 @@ final class PlayerModel {
 
     /// Reads a subtitle file the user picked and shows it.
     func addSubtitleFile(_ url: URL) {
+        if let engine, engine.drawsSubtitlesNatively, SidecarSubtitles.nativeExtensions.contains(url.pathExtension.lowercased()) {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            let name = url.deletingPathExtension().lastPathComponent
+            if let track = engine.addExternalSubtitle(url, title: name, language: nil) {
+                selectSubtitle(track)
+                showToast("Subtitles: \(name)", symbol: "captions.bubble")
+            } else {
+                showToast("Couldn't read that subtitle file", symbol: "exclamationmark.triangle")
+            }
+            return
+        }
         Task {
             do {
                 let track = try await subtitles.add(fileAt: url)
@@ -624,9 +643,27 @@ final class PlayerModel {
     private func loadSidecarSubtitles(for url: URL) {
         sidecarTask?.cancel()
         sidecarTask = Task {
-            await subtitles.discover(for: url)
+            await subtitles.discover(for: url, enginePaintsSubtitles: enginePaintsSubtitles)
             guard !Task.isCancelled, currentURL == url else { return }
+            addNativeSidecars(for: url)
             applySidecarPreference()
+        }
+    }
+
+    /// Hands the engine the sidecar files it draws itself (ASS keeps its styling), so they join the embedded tracks.
+    private func addNativeSidecars(for media: URL) {
+        guard let engine, engine.drawsSubtitlesNatively, !subtitles.nativeCandidates.isEmpty else { return }
+        let scopedFolder = folderAccess.beginAccess(toFolderContaining: media)
+        defer { scopedFolder?.stopAccessingSecurityScopedResource() }
+        for candidate in subtitles.nativeCandidates {
+            _ = engine.addExternalSubtitle(candidate.url, title: candidate.label == "Subtitles" ? nil : candidate.label, language: candidate.language)
+        }
+        refreshTracks()
+        // The remembered language may now match one of them.
+        if selectedSubtitle == nil, subtitles.selected == nil,
+           case .select(let track) = TrackSelectionPolicy.subtitle(from: subtitleTracks, choice: preferences.subtitleChoice, audioLanguage: selectedAudio?.language) {
+            engine.selectSubtitle(track)
+            refreshTracks()
         }
     }
 
@@ -644,16 +681,18 @@ final class PlayerModel {
 
     func adjustSubtitleDelayByShortcut(_ offset: Duration) {
         registerActivity()
-        guard drawsSubtitles else {
+        guard canDelaySubtitles else {
             showToast("Delay needs a subtitle file", symbol: "captions.bubble")
             return
         }
         subtitles.adjustDelay(by: offset)
+        engine?.setSubtitleDelay(subtitles.delay)
         showToast("Subtitle delay \(subtitles.delayLabel)", symbol: "captions.bubble")
     }
 
     func resetSubtitleDelay() {
         subtitles.resetDelay()
+        engine?.setSubtitleDelay(subtitles.delay)
         showToast("Subtitle delay \(subtitles.delayLabel)", symbol: "captions.bubble")
     }
 
@@ -674,8 +713,21 @@ final class PlayerModel {
         selectedSubtitle.flatMap { engine?.subtitleCues(for: $0) }
     }
 
-    /// Whether the app draws a subtitle over the video, so the overlay and the delay controls apply.
+    /// Whether the app draws a subtitle over the video, so the overlay applies.
     var drawsSubtitles: Bool { subtitles.selected != nil || engineDrawnCues != nil }
+
+    /// Whether a subtitle is showing that the delay controls can shift: one the app draws, or one the engine does.
+    var canDelaySubtitles: Bool { drawsSubtitles || (enginePaintsSubtitles && displayedSubtitle != nil) }
+
+    func setSubtitleStyle(_ style: SubtitleStyle) {
+        subtitles.setStyle(style)
+        engine?.setSubtitleStyle(style)
+    }
+
+    /// The overlay reports how far above the bottom the subtitles should sit; an engine that draws them moves them to match.
+    func setSubtitleLift(_ fraction: Double) {
+        engine?.setSubtitleLift(fraction)
+    }
 
     /// Switches audio track mid-playback and remembers its language for the next file.
     func selectAudio(_ track: MediaTrack?) {

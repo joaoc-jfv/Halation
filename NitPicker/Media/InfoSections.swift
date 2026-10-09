@@ -39,6 +39,7 @@ enum InfoSections {
         var hdr = [InfoRow(label: "Format", value: info.hdr.detailName)]
         if let primaries = ColorDescription.primaries(info.colorPrimaries) { hdr.append(InfoRow(label: "Color primaries", value: primaries)) }
         if let transfer = ColorDescription.transfer(info.transferFunction) { hdr.append(InfoRow(label: "Transfer", value: transfer)) }
+        if let note = info.hdrNote { hdr.append(InfoRow(label: "Note", value: note)) }
         if info.hdr.isHDR {
             hdr.append(InfoRow(
                 label: "This display",

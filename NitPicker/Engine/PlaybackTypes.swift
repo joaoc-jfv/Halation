@@ -109,6 +109,8 @@ struct MediaInfo: Equatable, Sendable {
     /// The file's own title metadata, if it has any.
     var title: String?
     var chapters: [Chapter] = []
+    /// An honest remark about how the picture is shown, e.g. a Dolby Vision source that the compatibility engine tone-maps to HDR10.
+    var hdrNote: String?
 
     /// What layout code should use: the display size, or the coded size when that is unknown.
     var presentationSize: CGSize? { displaySize ?? resolution }

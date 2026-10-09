@@ -38,6 +38,19 @@ protocol PlaybackEngine: AnyObject {
     /// Nil for a track the engine renders natively.
     func subtitleCues(for track: MediaTrack) -> SubtitleCueList?
 
+    /// Whether the engine draws the selected subtitle track itself (mpv does, including styled ASS and image formats), so the
+    /// app's own overlay has nothing to show for it but the delay, style and position still apply to the engine.
+    var drawsSubtitlesNatively: Bool { get }
+    /// Positive shows subtitles later. Only for engines that draw them.
+    func setSubtitleDelay(_ delay: Duration)
+    /// The user's subtitle size, background and position, for engines that draw plain-text subtitles themselves.
+    func setSubtitleStyle(_ style: SubtitleStyle)
+    /// How far above the bottom of the video the subtitles should sit, as a fraction of its height, so they clear the controls.
+    func setSubtitleLift(_ fraction: Double)
+    /// Loads a subtitle file the engine draws itself (ASS, SSA, SUP, VobSub) so it joins `subtitleTracks`. Returns the new track, or
+    /// nil if the engine can't. The caller selects it.
+    func addExternalSubtitle(_ url: URL, title: String?, language: String?) -> MediaTrack?
+
     /// A still from around `time`, no larger than `maxSize`, for artwork and scrub previews. Nil if none could be made.
     func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage?
 
@@ -62,4 +75,9 @@ protocol PlaybackEngine: AnyObject {
 
 extension PlaybackEngine {
     func subtitleCues(for track: MediaTrack) -> SubtitleCueList? { nil }
+    var drawsSubtitlesNatively: Bool { false }
+    func setSubtitleDelay(_ delay: Duration) {}
+    func setSubtitleStyle(_ style: SubtitleStyle) {}
+    func setSubtitleLift(_ fraction: Double) {}
+    func addExternalSubtitle(_ url: URL, title: String?, language: String?) -> MediaTrack? { nil }
 }

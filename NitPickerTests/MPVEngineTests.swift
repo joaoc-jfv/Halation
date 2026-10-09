@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import NitPicker
@@ -54,6 +55,31 @@ import Testing
         #expect(value("target-colorspace-hint", hdr: false) == "no")
         #expect(value("sub-auto", hdr: true) == "no")  // the app finds sidecar subtitles itself
         #expect(MPVEngine.options(hdr: false, audioLanguage: "fr").contains { $0.0 == "alang" && $0.1 == "fr" })
+    }
+
+    @Test func mapsTheSubtitleStyleToMPVsProperties() {
+        func properties(_ style: SubtitleStyle) -> [String: String] { Dictionary(uniqueKeysWithValues: MPVMapping.subtitleProperties(for: style)) }
+        var style = SubtitleStyle()
+        style.size = .medium
+        style.background = .shadow
+        #expect(properties(style)["sub-font-size"] == "32")  // 4.5% of a 720-high picture
+        #expect(properties(style)["sub-border-style"] == "outline-and-shadow")
+        #expect(properties(style)["sub-shadow-offset"] == "1.5")
+        style.size = .extraLarge
+        #expect(properties(style)["sub-font-size"] == "52")
+        style.background = .box
+        #expect(properties(style)["sub-border-style"] == "background-box")
+        #expect(properties(style)["sub-back-color"] == "#B8000000")
+        style.background = .none
+        #expect(properties(style)["sub-border-size"] == "0" && properties(style)["sub-shadow-offset"] == "0")
+    }
+
+    @Test func placesSubtitlesAboveTheBottomEdge() {
+        #expect(MPVMapping.subtitlePosition(lift: 0.06) == 97)  // the app's default: 6% up, mpv's own margin is about 3%
+        #expect(MPVMapping.subtitlePosition(lift: 0.16) == 87)
+        #expect(MPVMapping.subtitlePosition(lift: -0.2) == 123)
+        #expect(MPVMapping.subtitlePosition(lift: 5) == 0)
+        #expect(MPVMapping.subtitlePosition(lift: -9) == 150)
     }
 
     @Test func softensMPVsErrorsForTheUser() {
@@ -123,5 +149,298 @@ import Testing
         model.open(junk)
         await waitUntil("an error", timeout: .seconds(15)) { model.errorMessage != nil }
         #expect(model.errorMessage?.hasPrefix("This file can't be played") == true)
+    }
+}
+
+@MainActor
+@Suite struct MPVSubtitleTests {
+    private static let ass = """
+    [Script Info]
+    ScriptType: v4.00+
+    PlayResX: 384
+    PlayResY: 288
+
+    [V4+ Styles]
+    Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+    Style: Default,Arial,20,&H00FFFFFF,&H000000FF,&H00000000,&H00000000,0,0,0,0,100,100,0,0,1,2,2,2,10,10,10,1
+
+    [Events]
+    Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+    Dialogue: 0,0:00:00.50,0:00:02.50,Default,,0,0,0,,{\\i1}Styled{\\i0} line
+    """
+
+    private func loadedEngine() async throws -> (MPVEngine, URL) {
+        let file = try LegacyFixture.makeMPEG4(seconds: 4)
+        let engine = MPVEngine()
+        try await engine.load(file, startAt: nil)
+        return (engine, file)
+    }
+
+    @Test func mpvAcceptsEveryStylePropertyTheAppSends() async throws {
+        let (engine, file) = try await loadedEngine()
+        defer { engine.close(); try? FileManager.default.removeItem(at: file) }
+        let handle = try #require(engine.handleForTesting)
+        for size in SubtitleStyle.Size.allCases {
+            for background in SubtitleStyle.Background.allCases {
+                var style = SubtitleStyle()
+                style.size = size
+                style.background = background
+                for (name, value) in MPVMapping.subtitleProperties(for: style) {
+                    #expect(handle.set(name, string: value), "mpv refused \(name)=\(value)")
+                }
+            }
+        }
+        for lift in [-0.05, 0.06, 0.25] {
+            #expect(handle.set("sub-pos", string: "\(MPVMapping.subtitlePosition(lift: lift))"))
+        }
+        engine.setSubtitleStyle(SubtitleStyle())
+        engine.setSubtitleLift(0.16)
+        #expect(handle.double("sub-pos") == 87)
+        #expect(handle.double("sub-font-size") == 32)
+    }
+
+    @Test func addsAnAssFileAsATrackSelectsItAndShiftsIt() async throws {
+        let (engine, file) = try await loadedEngine()
+        let sidecar = file.deletingPathExtension().appendingPathExtension("en.ass")
+        try Self.ass.write(to: sidecar, atomically: true, encoding: .utf8)
+        defer { engine.close(); try? FileManager.default.removeItem(at: file); try? FileManager.default.removeItem(at: sidecar) }
+
+        #expect(engine.subtitleTracks.isEmpty)
+        let track = try #require(engine.addExternalSubtitle(sidecar, title: "English", language: "en"))
+        #expect(track.kind == .subtitle && track.title == "English" && track.language == "en" && track.codec == "ASS")
+        #expect(engine.subtitleTracks == [track])
+        engine.selectSubtitle(nil)
+        // Adding the same file again reuses the track.
+        _ = engine.addExternalSubtitle(sidecar, title: "English", language: "en")
+        #expect(engine.subtitleTracks.count == 1)
+
+        engine.selectSubtitle(track)
+        #expect(engine.selectedSubtitleTrack?.id == track.id)
+        engine.setSubtitleDelay(.milliseconds(500))
+        #expect(engine.handleForTesting?.double("sub-delay") == 0.5)
+        #expect(engine.drawsSubtitlesNatively)
+        #expect(engine.addExternalSubtitle(URL(fileURLWithPath: "/nonexistent/none.ass"), title: nil, language: nil) == nil)
+    }
+}
+
+@MainActor
+@Suite struct MPVThumbnailTests {
+    @Test func fitsAPictureIntoTheRequestedBoxWithItsPixelAspectApplied() {
+        func fit(_ width: Int, _ height: Int, _ aspect: Double = 1, _ box: CGSize) -> [Int] {
+            let size = MPVThumbnailer.fittedSize(width: width, height: height, pixelAspect: aspect, maxSize: box)
+            return [size.width, size.height]
+        }
+        #expect(fit(3840, 2160, 1, CGSize(width: 320, height: 180)) == [320, 180])
+        #expect(fit(320, 240, 1, CGSize(width: 640, height: 640)) == [320, 240], "never larger than the source")
+        #expect(fit(720, 480, 32.0 / 27.0, CGSize(width: 640, height: 640)) == [640, 360], "anamorphic DVD: 720×480 shows as 16:9")
+        #expect(fit(1000, 100, 1, CGSize(width: 100, height: 100)) == [100, 10])
+        #expect(fit(1, 1, 0, CGSize(width: 100, height: 100)) == [2, 2], "a missing pixel aspect counts as square")
+    }
+
+    @Test func makesAStillFromALegacyFileThatMPVPlays() async throws {
+        let file = try LegacyFixture.makeMPEG4(seconds: 6)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let engine = MPVEngine()
+        try await engine.load(file, startAt: nil)
+        defer { engine.close() }
+
+        let image = try #require(await engine.thumbnail(at: .seconds(3), maxSize: CGSize(width: 160, height: 160)))
+        #expect(image.width == 160 && image.height == 120)
+
+        // The clip is a moving gradient, so a real picture has many different values, and two moments differ.
+        func signature(_ image: CGImage) -> [UInt8] {
+            let data = image.dataProvider!.data! as Data
+            return stride(from: 0, to: data.count, by: 4 * 37).map { data[$0] }
+        }
+        let first = signature(image)
+        #expect(Set(first).count > 20)
+        let later = try #require(await engine.thumbnail(at: .seconds(5), maxSize: CGSize(width: 160, height: 160)))
+        #expect(signature(later) != first)
+        // Past the end still gives the last keyframe's picture rather than failing.
+        #expect(await engine.thumbnail(at: .seconds(600), maxSize: CGSize(width: 160, height: 160)) != nil)
+    }
+
+    @Test func aCancelledRequestGivesNothingAndAFileWithNoPictureGivesNothing() async throws {
+        let junk = FileManager.default.temporaryDirectory.appendingPathComponent("nitpicker-nothumb-\(UUID().uuidString).mkv")
+        try Data("not a video".utf8).write(to: junk)
+        defer { try? FileManager.default.removeItem(at: junk) }
+        let thumbnailer = MPVThumbnailer(path: junk.path)
+        #expect(await thumbnailer.thumbnail(at: .seconds(1), maxSize: CGSize(width: 100, height: 100)) == nil)
+        thumbnailer.close()
+    }
+
+    @Test func scrubPreviewsAndArtworkWorkThroughTheModel() async throws {
+        let file = try LegacyFixture.makeMPEG4(seconds: 6)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let model = PlayerModel(services: .testing())
+        defer { model.close() }
+        model.open(file)
+        await waitUntil("playback", timeout: .seconds(20)) { model.state == .playing }
+        await waitUntil("duration") { model.duration.seconds > 5 }
+        model.updateScrubPreview(fraction: 0.5)
+        await waitUntil("the preview picture") { model.scrubPreview?.image != nil }
+        #expect(model.scrubThumbnailsAvailable)
+    }
+}
+
+@MainActor
+@Suite struct MPVDolbyVisionNoteTests {
+    @Test func theNoteExplainsAToneMappedDolbyVisionSource() {
+        let note = MPVMapping.hdrNote(source: .dolbyVision(profile: 8, compatibilityID: 1), shown: .hdr10)
+        #expect(note?.hasPrefix("Dolby Vision 8.1 source, shown as HDR10 (tone-mapped)") == true)
+        #expect(MPVMapping.hdrNote(source: .hdr10, shown: .hdr10) == nil)
+        #expect(MPVMapping.hdrNote(source: nil, shown: .sdr) == nil)
+        let rows = InfoSections.build(
+            fileName: "a.mkv", info: MediaInfo(container: "MKV", engineName: "mpv (compatibility mode)", hdr: .hdr10, hdrNote: note),
+            audio: nil, outputMode: .spatial, isHDRPlaybackEligible: true, rate: 1
+        ).first { $0.title == "HDR" }?.rows
+        #expect(rows?.contains { $0.label == "Note" } == true)
+    }
+
+    @Test func readsTheDolbyVisionProfileFromTheFileAndShowsItInTheInfo() async throws {
+        let video = try await TestVideo.make(seconds: 3)
+        let file = try MKVFixture.make(from: video, options: .init(dolbyVision: (profile: 8, compatibilityID: 1)))
+        defer { try? FileManager.default.removeItem(at: video); try? FileManager.default.removeItem(at: file) }
+        #expect(MPVSourceProbe.hdrFormat(atPath: file.path) == .dolbyVision(profile: 8, compatibilityID: 1))
+        #expect(MPVSourceProbe.hdrFormat(atPath: video.path) == .sdr)
+        #expect(MPVSourceProbe.hdrFormat(atPath: "/nonexistent.mkv") == nil)
+
+        // mpv plays the file; the engine adds the note once libavformat has read the record.
+        let engine = MPVEngine()
+        defer { engine.close() }
+        var note: String?
+        let listener = Task { @MainActor in
+            for await event in engine.events {
+                if case .mediaInfoChanged(let info) = event, let found = info.hdrNote { note = found; break }
+            }
+        }
+        try await engine.load(file, startAt: nil)
+        await waitUntil("the note") { note != nil }
+        listener.cancel()
+        #expect(note?.contains("Dolby Vision 8.1") == true)
+    }
+}
+
+/// Draws a frame with and without a subtitle and compares them, so a style that mpv accepts but never shows would be caught.
+@MainActor
+@Suite struct MPVSubtitleRenderingTests {
+    private func differingPixels(_ a: MPVHandle.RawFrame, _ b: MPVHandle.RawFrame) -> Int {
+        guard a.width == b.width, a.height == b.height else { return -1 }
+        var count = 0
+        for row in 0..<a.height {
+            for column in 0..<a.width {
+                let offset = row * a.stride + column * 4
+                if a.bytes[offset] != b.bytes[offset] || a.bytes[offset + 1] != b.bytes[offset + 1] || a.bytes[offset + 2] != b.bytes[offset + 2] { count += 1 }
+            }
+        }
+        return count
+    }
+
+    private func frame(_ engine: MPVEngine) async throws -> MPVHandle.RawFrame {
+        // The renderer needs a moment after a change before the next frame carries it.
+        try await Task.sleep(for: .milliseconds(400))
+        let handle = try #require(engine.handleForTesting)
+        return try #require(handle.screenshotRaw("subtitles"), "no frame: \(engine.lastErrorLog ?? "")")
+    }
+
+    @Test func libassDrawsAStyledAssLineAndTheUsersStyleChangesHowBigPlainTextIs() async throws {
+        let file = try LegacyFixture.makeMPEG4(seconds: 5)
+        let assFile = file.deletingPathExtension().appendingPathExtension("ass")
+        let srtFile = file.deletingPathExtension().appendingPathExtension("srt")
+        try MPVSubtitleTests.assForRendering.write(to: assFile, atomically: true, encoding: .utf8)
+        try "1\n00:00:00,500 --> 00:00:04,500\nHello plain text\n".write(to: srtFile, atomically: true, encoding: .utf8)
+        let engine = MPVEngine()
+        try await engine.load(file, startAt: nil)
+        defer {
+            engine.close()
+            for url in [file, assFile, srtFile] { try? FileManager.default.removeItem(at: url) }
+        }
+        let ass = try #require(engine.addExternalSubtitle(assFile, title: "ASS", language: "en"))
+        let srt = try #require(engine.addExternalSubtitle(srtFile, title: "SRT", language: "en"))
+
+        await engine.seek(to: .seconds(2), precise: true)
+        engine.selectSubtitle(nil)
+        let bare = try await frame(engine)
+        engine.selectSubtitle(ass)
+        let withASS = try await frame(engine)
+        let assPixels = differingPixels(bare, withASS)
+        #expect(assPixels > 500, "the styled line should change the picture, changed \(assPixels)")
+
+        // Plain text follows the user's size: extra large covers more pixels than small.
+        engine.selectSubtitle(srt)
+        var style = SubtitleStyle()
+        style.size = .small
+        style.background = .none
+        engine.setSubtitleStyle(style)
+        let small = try await frame(engine)
+        style.size = .extraLarge
+        engine.setSubtitleStyle(style)
+        let large = try await frame(engine)
+        let smallPixels = differingPixels(bare, small), largePixels = differingPixels(bare, large)
+        #expect(smallPixels > 100 && largePixels > smallPixels * 2, "small \(smallPixels), extra large \(largePixels)")
+
+        // A box behind the text covers more than the text alone.
+        style.size = .medium
+        style.background = .none
+        engine.setSubtitleStyle(style)
+        let plain = try await frame(engine)
+        style.background = .box
+        engine.setSubtitleStyle(style)
+        let boxed = try await frame(engine)
+        #expect(differingPixels(bare, boxed) > differingPixels(bare, plain) * 3 / 2, "box \(differingPixels(bare, boxed)), plain \(differingPixels(bare, plain))")
+
+        // Lifting the subtitles moves them up the picture.
+        func lowestChangedRow(_ other: MPVHandle.RawFrame) -> Int {
+            (0..<bare.height).last { row in (0..<bare.width).contains { column in bare.bytes[row * bare.stride + column * 4 + 1] != other.bytes[row * bare.stride + column * 4 + 1] } } ?? -1
+        }
+        engine.setSubtitleLift(0.06)
+        let low = try await frame(engine)
+        engine.setSubtitleLift(0.35)
+        let high = try await frame(engine)
+        #expect(lowestChangedRow(high) < lowestChangedRow(low) - 20, "low \(lowestChangedRow(low)), high \(lowestChangedRow(high)) of \(bare.height)")
+    }
+}
+
+extension MPVSubtitleTests {
+    static let assForRendering = """
+    [Script Info]
+    ScriptType: v4.00+
+    PlayResX: 320
+    PlayResY: 240
+
+    [V4+ Styles]
+    Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+    Style: Default,Arial,28,&H0000FFFF,&H000000FF,&H00000000,&H00000000,1,0,0,0,100,100,0,0,1,2,2,5,10,10,10,1
+
+    [Events]
+    Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+    Dialogue: 0,0:00:00.50,0:00:04.50,Default,,0,0,0,,Styled yellow centre text
+    """
+}
+
+@MainActor
+@Suite struct MPVChapterTests {
+    @Test func listsChaptersAndTheModelNavigatesThem() async throws {
+        let video = try await TestVideo.make(seconds: 40)
+        let file = try MKVFixture.make(from: video, options: .init(chapters: [("Opening", 0), ("Middle", 3), ("End", 6)]))
+        defer { try? FileManager.default.removeItem(at: video); try? FileManager.default.removeItem(at: file) }
+        // The remuxer would take this file; the compatibility engine is asked for directly.
+        let model = PlayerModel(services: .testing(), engineFactory: { _ in MPVEngine() })
+        defer { model.close() }
+        model.open(file)
+        await waitUntil("chapters", timeout: .seconds(15)) { model.chapters.count == 3 }
+        #expect(model.chapters.map(\.title) == ["Opening", "Middle", "End"])
+        #expect(model.chapters.map { Int($0.start.seconds.rounded()) } == [0, 3, 6])
+        #expect(model.mediaInfo?.engineName == "mpv (compatibility mode)")
+
+        await waitUntil("playing") { model.state == .playing }
+        model.pause()
+        await waitUntil("paused") { model.state == .paused }
+        #expect(model.state == .paused, "state \(model.state)")
+        let next = model.nextChapter()
+        #expect(next?.title == "Middle")
+        await waitUntil("the jump") { abs(model.livePlaybackTime().seconds - 3) < 0.3 }
+        #expect(model.currentChapter?.title == "Middle")
+        #expect(model.previousChapter()?.title == "Opening")
     }
 }

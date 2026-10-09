@@ -223,7 +223,17 @@ private func cue(_ start: Double, _ end: Double, _ text: String = "x") -> Subtit
     }
 
     @Test func ignoresOtherFilesAndFormats() {
-        #expect(names(["Other.srt", "My Film (2024) Extended.srt", "My Film (2024).txt", "My Film (2024).mp4", "My Film (2024).ass"]).isEmpty)
+        #expect(names(["Other.srt", "My Film (2024) Extended.srt", "My Film (2024).txt", "My Film (2024).mp4", "My Film (2024).sup"]).isEmpty)
+    }
+
+    @Test func readsAssFilesAsTextAndLeavesTheImageFormatsToTheEngine() {
+        #expect(names(["My Film (2024).en.ass", "My Film (2024).ssa"]).count == 2)
+        let native = SidecarSubtitles.nativeCandidates(
+            forMedia: media,
+            in: ["My Film (2024).en.ass", "My Film (2024).fr.sup", "My Film (2024).idx", "My Film (2024).srt", "Other.ass"].map { URL(fileURLWithPath: "/movies/\($0)") }
+        )
+        #expect(native.map(\.url.lastPathComponent).sorted() == ["My Film (2024).en.ass", "My Film (2024).fr.sup", "My Film (2024).idx"])
+        #expect(native.first { $0.url.pathExtension == "sup" }?.language == "fr")
     }
 
     @Test func matchesCaseInsensitively() {
@@ -401,5 +411,48 @@ private func cue(_ start: Double, _ end: Double, _ text: String = "x") -> Subtit
         scoped?.stopAccessingSecurityScopedResource()
         // A sibling folder with a similar name is not covered.
         #expect(access.beginAccess(toFolderContaining: URL(fileURLWithPath: folder.path + "-other/c.mp4")) == nil)
+    }
+}
+
+
+@Suite struct ASSParserTests {
+    private let file = """
+    [Script Info]
+    Title: Test
+
+    [V4+ Styles]
+    Format: Name, Fontname
+    Style: Default,Arial
+
+    [Events]
+    Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+    Dialogue: 0,0:00:01.50,0:00:03.00,Default,,0,0,0,,{\\an8\\i1}Hello, world{\\i0}\\Nsecond line
+    Dialogue: 0,0:01:00.00,0:01:02.25,Default,Bob,0,0,0,,Bye\\hnow
+    Dialogue: 0,0:00:10.00,0:00:11.00,Default,,0,0,0,,{\\p1}m 0 0 l 10 10{\\p0}
+    Dialogue: 0,0:00:20.00,0:00:19.00,Default,,0,0,0,,backwards
+    Comment: 0,0:00:30.00,0:00:31.00,Default,,0,0,0,,not a cue
+    """
+
+    @Test func readsTextTimingAndLineBreaks() {
+        let cues = ASSParser.parse(file)
+        #expect(cues.count == 2)
+        #expect(cues[0].start == .seconds(1.5) && cues[0].end == .seconds(3))
+        // Commas inside the text stay, the override tags are left for SubtitleMarkup to drop, `\N` is a line break.
+        #expect(SubtitleMarkup.plainText(from: cues[0].text) == "Hello, world\nsecond line")
+        #expect(cues[1].start == .seconds(60) && cues[1].end == .seconds(62.25))
+        #expect(cues[1].text == "Bye now")
+    }
+
+    @Test func honoursACustomFormatLine() {
+        let custom = "[Events]\nFormat: Marked, Start, End, Text\nDialogue: Marked=0,0:00:01.00,0:00:02.00,Hi there"
+        #expect(ASSParser.parse(custom).map(\.text) == ["Hi there"])
+    }
+
+    @Test func loadsThroughTheLoaderAndIgnoresOtherSections() throws {
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("nitpicker-\(UUID().uuidString).ass")
+        defer { try? FileManager.default.removeItem(at: url) }
+        try file.write(to: url, atomically: true, encoding: .utf8)
+        #expect(try SubtitleLoader.load(from: url).cues.count == 2)
+        #expect(ASSParser.parse("[Script Info]\nTitle: nothing").isEmpty)
     }
 }

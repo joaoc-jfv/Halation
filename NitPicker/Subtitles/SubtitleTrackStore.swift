@@ -29,6 +29,8 @@ final class SubtitleTrackStore {
     private(set) var selectedID: String?
     private(set) var delay: Duration = .zero
     private(set) var sidecarAccess: SidecarAccess = .unknown
+    /// Sidecar files only an engine that draws subtitles itself can show (found by `discover(for:enginePaintsSubtitles:)`).
+    private(set) var nativeCandidates: [SidecarSubtitles.Candidate] = []
     private(set) var style: SubtitleStyle
 
     @ObservationIgnored private let preferences: Preferences
@@ -49,6 +51,7 @@ final class SubtitleTrackStore {
     func reset() {
         generation += 1
         tracks = []
+        nativeCandidates = []
         selectedID = nil
         delay = .zero
         sidecarAccess = .unknown
@@ -56,8 +59,9 @@ final class SubtitleTrackStore {
 
     // MARK: Discovery and loading
 
-    /// Looks for subtitle files next to `media` and loads them.
-    func discover(for media: URL) async {
+    /// Looks for subtitle files next to `media` and loads them. With `enginePaintsSubtitles`, ASS/SSA files and the image formats are
+    /// left for the engine (`nativeCandidates`) so they keep their styling; otherwise ASS/SSA is read as plain text.
+    func discover(for media: URL, enginePaintsSubtitles: Bool = false) async {
         let current = generation
         let scopedFolder = folderAccess.beginAccess(toFolderContaining: media)
         defer { scopedFolder?.stopAccessingSecurityScopedResource() }
@@ -70,7 +74,9 @@ final class SubtitleTrackStore {
         guard current == generation else { return }
         sidecarAccess = .available
 
+        if enginePaintsSubtitles { nativeCandidates = SidecarSubtitles.nativeCandidates(forMedia: media, in: contents) }
         for candidate in SidecarSubtitles.candidates(forMedia: media, in: contents) {
+            if enginePaintsSubtitles, SidecarSubtitles.nativeExtensions.contains(candidate.url.pathExtension.lowercased()) { continue }
             guard let cues = try? await Self.loadCues(from: candidate.url), current == generation else { continue }
             append(Track(id: candidate.url.path, label: candidate.label, language: candidate.language, source: candidate.url, cues: cues))
         }
