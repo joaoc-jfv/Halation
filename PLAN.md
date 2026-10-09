@@ -7,6 +7,65 @@ This document is the full build plan. It is written so that an engineer (or anot
 
 ---
 
+## 0. Where things stand (read this first)
+
+*Written at the end of milestone 2.2 so work can continue from a fresh chat. Everything below is also true in the code and tests; the rest of this file is the design.*
+
+### State
+
+| Area | State |
+|---|---|
+| Phase 1 (MP4/MOV/M4V player, §7) | **Done**, milestones 1.1–1.10. |
+| Phase 2 spike (`Spikes/MKVRemux/`) | **Done.** Approach confirmed on a real 4K Dolby Vision 8.1 + E-AC-3 JOC MKV; its README has the measurements. |
+| 2.1 FFmpeg, `MKVProbe`, `LoopbackServer`, entitlements | **Done.** |
+| 2.2 `RemuxEngine` (MKV plays, HDR/DV, Spatial Audio, seeking) | **Done.** Verified on the real file, not just generated clips. |
+| **2.3 Tracks (next)**, 2.4 Hardening | Not started. Details below. |
+| Phase 3 (mpv fallback), Phase 4 | Not started. |
+
+287 tests pass (`xcodebuild … test`). The Release app is 40 MB (FFmpeg is ~31 MB of that). One commit per milestone; `git log` is the history.
+
+### To start a session
+1. Read `CLAUDE.md`, this section, §7 Phase 2, and `Spikes/MKVRemux/README.md`.
+2. `xcodegen generate && xcodebuild -scheme Halation -destination 'platform=macOS' test`. The first build downloads the FFmpeg binaries (~100 MB).
+3. `TestMedia/` (gitignored, never commit) holds one real file for manual checks: a 3840×1920 HEVC Dolby Vision profile 8.1 MKV, 55 minutes, 10.6 GB, two E-AC-3 5.1 JOC audio tracks (Italian first and default, then English), and 46 SRT subtitle tracks (including Forced and SDH). Open it with `open -a <built Halation.app> <file>`.
+
+### Next: milestone 2.3 (tracks)
+Both pieces plug into code that already exists; what's new is the MKV side.
+- **Audio track switching.** Today `RemuxEngine` remuxes one audio track chosen before playback (`RemuxSession.plan`) and `selectAudio` does nothing. Simplest robust design: expose every copyable audio stream as a `MediaTrack` (the probe already has them) and, on selection, start a new `RemuxSession` with that stream and `inner.load(newURL, startAt: currentTime)`, keeping the play state (a brief gap is acceptable). The nicer alternative is HLS alternate renditions (`#EXT-X-MEDIA:TYPE=AUDIO`, audio-only fMP4 segments aligned to the same boundaries), which gives seamless switching and real `AVMediaSelectionGroup` tracks, but is untested here. The spike muxes audio and video together and that is known to work.
+- **Subtitles from the MKV.** The file has text tracks (`subrip`; `ass` is possible). Matroska interleaves them through the whole file, so reading one track means scanning the file: do it in the background when the user picks a track (and cache the cues), showing them as they arrive. Packets are plain text for SubRip; ASS packets are `ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text`, so keep the last field and strip `{\…}` overrides (`SubtitleMarkup` already does the latter). Feed the existing `SubtitleTrackStore` (add a track source that isn't a file URL), so the overlay, delay, style, Z/X, remembered language and the S-key cycle all work unchanged. Use `isForced`/`isDefault` from the probe with `TrackSelectionPolicy`.
+- **Thumbnails** for MKV (Now Playing artwork, welcome posters, scrub previews): `AVAssetImageGenerator` can't read an HLS stream. Idea: serve "init + one segment" as a standalone MP4 from the loopback server and generate the still from that. Until then the scrub preview shows only the time (`PlayerModel.scrubThumbnailsAvailable`).
+- Wire the new tracks into `TrackPanel`/menus: they already list `engine.audioTracks`/`subtitleTracks`.
+
+### Then: milestone 2.4 (hardening)
+- Audio AVPlayer can't play (DTS, TrueHD, Opus, MP3, Vorbis): decode with libavcodec and re-encode (E-AC-3 or AAC 5.1, keep the channel count). The FFmpeg build has the native `eac3`/`ac3`/`aac`/`flac` encoders; libswresample is linked. Currently these files fail with "This file's audio (DTS) isn't supported yet.".
+- Files without Cues (no seek index): scan once for keyframes. Currently refused.
+- AV1: needs `av1C` codec strings in `HLSPlaylists` and a hardware-support check; untested for lack of a file. VP9/MPEG-2/etc. belong to phase 3.
+- HDR10+, `Timestamps are unset in a packet` warnings from the muxer (harmless so far), files whose first video pts isn't 0, variable frame rate, multiple video tracks, memory under many seeks, CPU on 8K.
+
+### Known gaps and things not verified
+- **Not verified by eye or ear (needs a person):** Dolby Vision actually switching the display into DV mode; how the JOC track sounds on AirPods; HDR brightness on screen. The data path (tags, sample entries, flags, pixel format) is verified.
+- No MKV subtitles, no audio switching, no MKV thumbnails (2.3).
+- The sandbox's folder-access prompt for sidecar subtitles couldn't be exercised end to end (only its failure path is tested).
+- `Halation.app` is signed ad hoc, so Hardened Runtime is off; real signing, notarization and Sparkle are phase 4.
+
+### Decisions that belong to the owner
+- **License for Halation** (§9 item 7). FFmpeg is linked **statically under the LGPL**, so users must be able to relink; open-sourcing is the simplest answer. Needed before shipping phase 2.
+- "Dolby Vision" is used as the descriptive name (decided in 1.9, one place: `HDRFormat.badge`). "Dolby Atmos" is never shown; a test checks it.
+- FFmpeg comes from MPVKit's release assets, whose README says it is lightly maintained. We use only its prebuilt binaries via `Packages/FFmpegKit`. AetherEngine (a library that already does this whole job) is the fallback or reference.
+
+### Gotchas learned the hard way
+- **`project.yml` is the source of truth** for the Xcode project, the Info.plist and the **entitlements**. XcodeGen rewrites `Halation.entitlements` from `entitlements.properties`; for milestones 1.1–1.5 it was regenerated empty and the app ran unsandboxed. Run `xcodegen generate` after adding or removing files.
+- **Closures the system calls on its own queue** (MediaPlayer artwork and remote commands) must be created in a `nonisolated` function, or Swift 6 traps at run time. Fake services in tests can't catch this; launch the real app.
+- Sandbox: both `network.server` and `network.client` are needed for the loopback server (verified). The sandbox is enforced for network here.
+- AVFoundation can't describe HLS tracks (see 2.2 notes); `AVAssetResourceLoader` can't feed HLS media.
+- libavformat parses Matroska Cues lazily (first seek); the muxer needs `strict unofficial` for the Dolby Vision box and `delay_moov` for `dec3`. The details are in the spike README.
+- Linking FFmpeg statically needs its dependencies (gmp, gnutls, nettle, hogweed, dav1d, uavs3d, lcms2) linked explicitly in `Packages/FFmpegKit/Package.swift`.
+- Swift Testing runs tests in parallel; tests that touch `UserDefaults` use throwaway suites (`TestPreferences`, `PlayerServices.testing`). `FakeEngine` (tests) scripts a `PlaybackEngine`.
+- **Checking the real app**: `open -a <app> <file>`, then System Events scripting (`osascript`) for keys, menus and window geometry, `screencapture -R x,y,w,h` of the window, and `CGEvent` for real clicks (a tiny Swift tool; `System Events` clicks don't register as double-clicks). It only works while the Mac is unlocked. A stale "Halation quit unexpectedly" dialog after a crashing test run is harmless; check `~/Library/Logs/DiagnosticReports/Halation*.ips` for real crashes.
+- Generated test media: `TestVideo.make` (AVAssetWriter) plus `MKVFixture` (FFmpeg remux into Matroska with chapters, subtitles, a Dolby Vision record) mean no media is committed.
+
+---
+
 ## 1. Goals and non-goals
 
 ### Goals
@@ -141,7 +200,7 @@ Halation/
 │   ├── Engine/
 │   │   ├── PlaybackEngine.swift, PlaybackTypes.swift, EngineRouter.swift
 │   │   ├── AVFoundation/   AVFoundationEngine.swift, AVTrackMapping.swift, PlayerLayerView.swift, PiPController.swift
-│   │   ├── Remux/          MKVProbe.swift, LoopbackServer.swift, FFmpegInfo.swift (phase 2; RemuxEngine comes in 2.2)
+│   │   ├── Remux/          RemuxEngine, RemuxSession, SegmentMuxer, SegmentPlanner, HLSPlaylists, MP4Boxes, MKVProbe, LoopbackServer, FFmpegInfo (phase 2)
 │   │   └── MPV/            (phase 3)
 │   ├── Media/          CodecNames.swift, ColorDescription.swift, MediaBadges.swift, InfoSections.swift, LanguageMatching.swift, MediaProbe.swift, HDRDetection.swift, AudioFormatDetection.swift
 │   ├── Player/         PlayerModel.swift, PlayerModel+Shortcuts.swift, ChapterNavigation.swift, VideoLayout.swift, VideoGeometry.swift, TrackSelectionPolicy.swift, MediaTrack+Labels.swift, PlaybackSpeed.swift, Toast.swift, TimeFormatting.swift
