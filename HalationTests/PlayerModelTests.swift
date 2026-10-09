@@ -241,3 +241,142 @@ import Testing
         #expect(result == [0, nil, nil])
     }
 }
+
+@MainActor
+@Suite struct SidecarPlaybackTests {
+    private func wait(
+        _ what: String, timeout: Duration = .seconds(10),
+        sourceLocation: SourceLocation = #_sourceLocation,
+        until condition: () -> Bool
+    ) async {
+        let deadline = ContinuousClock.now + timeout
+        while !condition() {
+            if ContinuousClock.now > deadline {
+                Issue.record("Timed out waiting for \(what)", sourceLocation: sourceLocation)
+                return
+            }
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
+
+    private func movie(withSubtitles files: [String: String], seconds: Int = 6) async throws -> URL {
+        let video = try await TestVideo.make(seconds: seconds)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("halation-movie-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let url = folder.appendingPathComponent("film.mp4")
+        try FileManager.default.moveItem(at: video, to: url)
+        for (name, text) in files { try text.write(to: folder.appendingPathComponent(name), atomically: true, encoding: .utf8) }
+        return url
+    }
+
+    private let srt = "1\n00:00:01,000 --> 00:00:03,000\n<i>Hello</i>\n"
+
+    @Test func autoLoadsAndShowsASidecarThatMatchesNothingElse() async throws {
+        let url = try await movie(withSubtitles: ["film.en.srt": srt, "film.fr.srt": srt.replacingOccurrences(of: "Hello", with: "Salut")])
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let preferences = TestPreferences.make()
+        let player = PlayerModel(preferences: preferences)
+        defer { player.close() }
+
+        player.open(url)
+        await wait("sidecars") { player.subtitles.tracks.count == 2 }
+        await wait("auto selection") { player.subtitles.selected != nil }
+        #expect(player.hasVisibleSubtitle)
+        #expect(player.subtitles.selected?.language == "en")  // sorted by label: English before French
+
+        player.seek(to: .seconds(2), precise: true)
+        await wait("cue at 2 s") { !player.activeSubtitleCues().isEmpty }
+        #expect(SubtitleMarkup.plainText(from: player.activeSubtitleCues()[0].text) == "Hello")
+    }
+
+    @Test func rememberedLanguagePicksTheMatchingSidecar() async throws {
+        let url = try await movie(withSubtitles: ["film.en.srt": srt, "film.fr.srt": srt.replacingOccurrences(of: "Hello", with: "Salut")])
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let preferences = TestPreferences.make()
+        preferences.subtitleChoice = .language("fr")
+        let player = PlayerModel(preferences: preferences)
+        defer { player.close() }
+
+        player.open(url)
+        await wait("auto selection") { player.subtitles.selected != nil }
+        #expect(player.subtitles.selected?.language == "fr")
+    }
+
+    @Test func offPreferenceKeepsSidecarsListedButHidden() async throws {
+        let url = try await movie(withSubtitles: ["film.srt": srt])
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let preferences = TestPreferences.make()
+        preferences.subtitleChoice = .off
+        let player = PlayerModel(preferences: preferences)
+        defer { player.close() }
+
+        player.open(url)
+        await wait("sidecars") { player.subtitles.tracks.count == 1 }
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(player.subtitles.selected == nil)
+        #expect(!player.hasVisibleSubtitle)
+    }
+
+    @Test func choosingAndTurningOffSidecarsIsRememberedAndCyclable() async throws {
+        let url = try await movie(withSubtitles: ["film.en.srt": srt, "film.fr.srt": srt])
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let preferences = TestPreferences.make()
+        let player = PlayerModel(preferences: preferences)
+        defer { player.close() }
+        player.open(url)
+        await wait("auto selection") { player.subtitles.selected != nil }
+
+        player.cycleSubtitlesByShortcut()  // English -> French
+        #expect(player.subtitles.selected?.language == "fr")
+        #expect(preferences.subtitleChoice == .language("fr"))
+        player.cycleSubtitlesByShortcut()  // French -> Off
+        #expect(player.subtitles.selected == nil)
+        #expect(preferences.subtitleChoice == .off)
+        #expect(player.toast?.text == "Subtitles Off")
+        player.cycleSubtitlesByShortcut()  // Off -> English
+        #expect(player.subtitles.selected?.language == "en")
+    }
+
+    @Test func delayShortcutsNeedASubtitleAndResetBetweenFiles() async throws {
+        let url = try await movie(withSubtitles: ["film.srt": srt])
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let preferences = TestPreferences.make()
+        preferences.subtitleChoice = .off
+        let player = PlayerModel(preferences: preferences)
+        defer { player.close() }
+        player.open(url)
+        await wait("sidecars") { player.subtitles.tracks.count == 1 }
+
+        player.adjustSubtitleDelayByShortcut(.milliseconds(100))
+        #expect(player.toast?.text == "Delay needs a subtitle file")
+        player.selectExternalSubtitle(player.subtitles.tracks[0])
+        player.adjustSubtitleDelayByShortcut(.milliseconds(100))
+        player.adjustSubtitleDelayByShortcut(.milliseconds(100))
+        #expect(player.toast?.text == "Subtitle delay +0.2 s")
+        player.adjustSubtitleDelayByShortcut(.milliseconds(-300))
+        #expect(player.toast?.text == "Subtitle delay −0.1 s")
+
+        player.open(url)  // reopening starts fresh
+        await wait("the delay to reset") { player.subtitles.delay == .zero }
+        await wait("sidecars again") { player.subtitles.tracks.count == 1 }
+    }
+
+    @Test func addingAFileSelectsIt() async throws {
+        let url = try await movie(withSubtitles: [:])
+        defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
+        let extra = url.deletingLastPathComponent().appendingPathComponent("elsewhere.fr.srt")
+        try srt.write(to: extra, atomically: true, encoding: .utf8)
+        let player = PlayerModel(preferences: TestPreferences.make())
+        defer { player.close() }
+        player.open(url)
+        await wait("playback") { player.state == .playing }
+
+        player.addSubtitleFile(extra)
+        await wait("added track") { player.subtitles.selected != nil }
+        #expect(player.subtitles.selected?.language == "fr")
+
+        player.addSubtitleFile(url)  // not a subtitle file
+        await wait("error toast") { player.toast?.text == "Couldn't read that subtitle file" }
+        #expect(player.subtitles.tracks.count == 1)
+    }
+}

@@ -7,6 +7,9 @@ final class Preferences {
         static let audioLanguage = "preferredAudioLanguage"
         static let subtitleChoice = "preferredSubtitleChoice"
         static let audioOutputMode = "audioOutputMode"
+        static let subtitleSize = "subtitleSize"
+        static let subtitleBackground = "subtitleBackground"
+        static let subtitleOffset = "subtitleOffset"
     }
 
     private static let offValue = "off"
@@ -41,5 +44,23 @@ final class Preferences {
     var audioOutputMode: AudioOutputMode {
         get { defaults.string(forKey: Key.audioOutputMode) == "stereo" ? .stereo : .spatial }
         set { defaults.set(newValue == .stereo ? "stereo" : "spatial", forKey: Key.audioOutputMode) }
+    }
+
+    var subtitleStyle: SubtitleStyle {
+        get {
+            var style = SubtitleStyle()
+            style.size = defaults.string(forKey: Key.subtitleSize).flatMap(SubtitleStyle.Size.init) ?? style.size
+            style.background = defaults.string(forKey: Key.subtitleBackground).flatMap(SubtitleStyle.Background.init) ?? style.background
+            if defaults.object(forKey: Key.subtitleOffset) != nil {
+                let offset = defaults.double(forKey: Key.subtitleOffset)
+                style.verticalOffset = min(max(offset, SubtitleStyle.offsetRange.lowerBound), SubtitleStyle.offsetRange.upperBound)
+            }
+            return style
+        }
+        set {
+            defaults.set(newValue.size.rawValue, forKey: Key.subtitleSize)
+            defaults.set(newValue.background.rawValue, forKey: Key.subtitleBackground)
+            defaults.set(newValue.verticalOffset, forKey: Key.subtitleOffset)
+        }
     }
 }

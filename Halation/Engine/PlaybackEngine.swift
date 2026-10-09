@@ -16,6 +16,8 @@ protocol PlaybackEngine: AnyObject {
     func seek(to time: Duration, precise: Bool) async
     /// ±1 frame while paused.
     func step(frames: Int)
+    /// The playhead right now, unlike the throttled `.timeChanged` events. For subtitle timing.
+    var currentTime: Duration { get }
 
     /// 0.25 ... 4.0
     var rate: Float { get set }

@@ -58,21 +58,32 @@ extension PlayerModel {
         showToast("Audio: \(next.summary)", symbol: "speaker.wave.2")
     }
 
-    /// Cycles Off → first track → … → last track → Off.
+    /// Cycles Off → embedded tracks → sidecar tracks → Off.
     func cycleSubtitlesByShortcut() {
         registerActivity()
-        let tracks = selectableSubtitleTracks
-        guard !tracks.isEmpty else {
+        let embedded = selectableSubtitleTracks
+        let external = subtitles.tracks
+        guard !embedded.isEmpty || !external.isEmpty else {
             showToast("No subtitles", symbol: "captions.bubble")
             return
         }
-        let next: MediaTrack? = switch displayedSubtitle.flatMap({ tracks.firstIndex(of: $0) }) {
-        case nil: tracks[0]
-        case let index? where index + 1 < tracks.count: tracks[index + 1]
-        default: nil
+        // Options in order, with the one showing now (nil = Off).
+        let count = embedded.count + external.count
+        let current: Int? = subtitles.selected.flatMap { selected in external.firstIndex(of: selected).map { embedded.count + $0 } }
+            ?? displayedSubtitle.flatMap { embedded.firstIndex(of: $0) }
+        let next = current.map { $0 + 1 } ?? 0
+
+        if next >= count {
+            selectSubtitle(nil)
+            showToast("Subtitles Off", symbol: "captions.bubble")
+        } else if next < embedded.count {
+            selectSubtitle(embedded[next])
+            showToast("Subtitles: \(embedded[next].displayName)", symbol: "captions.bubble")
+        } else {
+            let track = external[next - embedded.count]
+            selectExternalSubtitle(track)
+            showToast("Subtitles: \(track.label)", symbol: "captions.bubble")
         }
-        selectSubtitle(next)
-        showToast(next.map { "Subtitles: \($0.displayName)" } ?? "Subtitles Off", symbol: "captions.bubble")
     }
 
     private func showVolumeToast() {

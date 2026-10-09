@@ -14,6 +14,9 @@ struct PlayerWindowView: View {
             if let videoView = player.videoView {
                 VideoSurfaceView(videoView: videoView) { windowController.toggleFullScreen() }
             }
+            if player.subtitles.selected != nil {
+                SubtitleOverlay()
+            }
             if !showsControls {
                 EmptyStateView()
             }

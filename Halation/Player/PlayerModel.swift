@@ -35,7 +35,12 @@ final class PlayerModel {
         if case .failed(let error) = state { error.localizedDescription } else { nil }
     }
 
+    /// Sidecar subtitle tracks, delay and style. Embedded tracks stay on the engine.
+    let subtitles: SubtitleTrackStore
+
     @ObservationIgnored private let preferences: Preferences
+    @ObservationIgnored private let folderAccess: FolderAccess
+    @ObservationIgnored private var sidecarTask: Task<Void, Never>?
     @ObservationIgnored private var engine: (any PlaybackEngine)?
     @ObservationIgnored private var openTask: Task<Void, Never>?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
@@ -48,8 +53,10 @@ final class PlayerModel {
     @ObservationIgnored var autoHideDelay: Duration = .seconds(2.5)
     @ObservationIgnored var toastDuration: Duration = .seconds(1.2)
 
-    init(preferences: Preferences = Preferences()) {
+    init(preferences: Preferences = Preferences(), folderAccess: FolderAccess = FolderAccess()) {
         self.preferences = preferences
+        self.folderAccess = folderAccess
+        subtitles = SubtitleTrackStore(preferences: preferences, folderAccess: folderAccess)
         audioOutputMode = preferences.audioOutputMode
     }
 
@@ -79,6 +86,7 @@ final class PlayerModel {
             try Task.checkCancellation()
             applyTrackPreferences(to: engine)
             engine.play()
+            loadSidecarSubtitles(for: url)
         } catch is CancellationError {
             // Superseded by another open().
         } catch {
@@ -104,6 +112,9 @@ final class PlayerModel {
     }
 
     private func teardown() {
+        sidecarTask?.cancel()
+        sidecarTask = nil
+        subtitles.reset()
         eventTask?.cancel()
         eventTask = nil
         engine?.close()
@@ -281,6 +292,92 @@ final class PlayerModel {
     /// The selected subtitle track as the user sees it: a forced-only track counts as Off.
     var displayedSubtitle: MediaTrack? { selectedSubtitle.flatMap { $0.isForced ? nil : $0 } }
 
+    // MARK: Sidecar subtitles
+
+    /// Whether an embedded or sidecar subtitle is showing.
+    var hasVisibleSubtitle: Bool { displayedSubtitle != nil || subtitles.selected != nil }
+
+    /// Selects a sidecar track and turns embedded subtitles off (a forced one in the audio language still shows).
+    func selectExternalSubtitle(_ track: SubtitleTrackStore.Track, remember: Bool = true) {
+        subtitles.select(track.id)
+        if case .select(let forced) = TrackSelectionPolicy.subtitle(
+            from: subtitleTracks, choice: .off, audioLanguage: selectedAudio?.language
+        ) {
+            engine?.selectSubtitle(forced)
+        }
+        refreshTracks()
+        if remember, let language = track.language { preferences.subtitleChoice = .language(language) }
+    }
+
+    /// Reads a subtitle file the user picked and shows it.
+    func addSubtitleFile(_ url: URL) {
+        Task {
+            do {
+                let track = try await subtitles.add(fileAt: url)
+                selectExternalSubtitle(track)
+                showToast("Subtitles: \(track.label)", symbol: "captions.bubble")
+            } catch is CancellationError {
+            } catch {
+                showToast("Couldn't read that subtitle file", symbol: "exclamationmark.triangle")
+            }
+        }
+    }
+
+    /// Asks for access to the video's folder, so sidecar files next to it can load, and remembers the choice.
+    func requestSidecarFolderAccess() {
+        guard let url = currentURL else { return }
+        OpenPanel.chooseFolder(startingAt: url.deletingLastPathComponent()) { [weak self] folder in
+            guard let self else { return }
+            try? folderAccess.remember(folder)
+            loadSidecarSubtitles(for: url)
+        }
+    }
+
+    private func loadSidecarSubtitles(for url: URL) {
+        sidecarTask?.cancel()
+        sidecarTask = Task {
+            await subtitles.discover(for: url)
+            guard !Task.isCancelled, currentURL == url else { return }
+            applySidecarPreference()
+        }
+    }
+
+    /// With no embedded subtitle showing, picks a sidecar track to match the remembered choice.
+    private func applySidecarPreference() {
+        guard subtitles.selected == nil, displayedSubtitle == nil, !subtitles.tracks.isEmpty else { return }
+        let track: SubtitleTrackStore.Track?
+        switch preferences.subtitleChoice {
+        case .off: track = nil
+        case .language(let language): track = subtitles.tracks.first { LanguageMatching.matches($0.language, language) }
+        case .unset: track = selectableSubtitleTracks.isEmpty ? subtitles.tracks.first : nil
+        }
+        if let track { selectExternalSubtitle(track, remember: false) }
+    }
+
+    func adjustSubtitleDelayByShortcut(_ offset: Duration) {
+        registerActivity()
+        guard subtitles.selected != nil else {
+            showToast("Delay needs a subtitle file", symbol: "captions.bubble")
+            return
+        }
+        subtitles.adjustDelay(by: offset)
+        showToast("Subtitle delay \(subtitles.delayLabel)", symbol: "captions.bubble")
+    }
+
+    func resetSubtitleDelay() {
+        subtitles.resetDelay()
+        showToast("Subtitle delay \(subtitles.delayLabel)", symbol: "captions.bubble")
+    }
+
+    /// The playhead for subtitle timing. Reads the engine directly because `currentTime` only updates 4 times a second.
+    func livePlaybackTime() -> Duration {
+        engine?.currentTime ?? currentTime
+    }
+
+    func activeSubtitleCues() -> [SubtitleCue] {
+        subtitles.activeCues(atPlaybackTime: isPlaying ? livePlaybackTime() : currentTime)
+    }
+
     /// Switches audio track mid-playback and remembers its language for the next file.
     func selectAudio(_ track: MediaTrack?) {
         engine?.selectAudio(track)
@@ -290,6 +387,7 @@ final class PlayerModel {
 
     /// `nil` turns subtitles off (a forced track in the audio language still shows). The choice is remembered.
     func selectSubtitle(_ track: MediaTrack?) {
+        subtitles.select(nil)
         if let track {
             engine?.selectSubtitle(track)
             if let language = track.language { preferences.subtitleChoice = .language(language) }

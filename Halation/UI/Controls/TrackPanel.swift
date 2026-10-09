@@ -48,7 +48,7 @@ struct TrackPanel: View {
     private var subtitleColumn: some View {
         VStack(alignment: .leading, spacing: 4) {
             heading("Subtitles")
-            TrackRow(title: "Off", isSelected: player.displayedSubtitle == nil) {
+            TrackRow(title: "Off", isSelected: !player.hasVisibleSubtitle) {
                 player.selectSubtitle(nil)
             }
             ForEach(player.selectableSubtitleTracks) { track in
@@ -56,11 +56,42 @@ struct TrackPanel: View {
                     player.selectSubtitle(track)
                 }
             }
-            if player.selectableSubtitleTracks.isEmpty {
-                emptyNote("No embedded subtitles")
+            ForEach(player.subtitles.tracks) { track in
+                TrackRow(title: track.label, detail: "Subtitle file", isSelected: track == player.subtitles.selected) {
+                    player.selectExternalSubtitle(track)
+                }
+            }
+            if player.selectableSubtitleTracks.isEmpty && player.subtitles.tracks.isEmpty {
+                emptyNote("No subtitles found")
+            }
+            Divider().padding(.vertical, 6)
+            panelButton("Add Subtitle File…", symbol: "plus") {
+                OpenPanel.chooseSubtitleFile { player.addSubtitleFile($0) }
+            }
+            if player.subtitles.sidecarAccess == .needsFolderAccess {
+                panelButton("Find Subtitles in This Folder…", symbol: "folder") {
+                    player.requestSidecarFolderAccess()
+                }
+            }
+            if player.subtitles.selected != nil {
+                Text("Delay \(player.subtitles.delayLabel) · Z / X to adjust")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 6)
             }
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    private func panelButton(_ title: LocalizedStringKey, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .foregroundStyle(.white)
+                .padding(.vertical, 5)
+                .padding(.horizontal, 6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 
     private func heading(_ title: LocalizedStringKey) -> some View {
@@ -82,6 +113,13 @@ private struct TrackRow: View {
     var isSpatial = false
     let isSelected: Bool
     let action: () -> Void
+
+    init(title: String, detail: String?, isSelected: Bool, action: @escaping () -> Void) {
+        self.title = title
+        self.detail = detail
+        self.isSelected = isSelected
+        self.action = action
+    }
 
     init(track: MediaTrack, isSelected: Bool, action: @escaping () -> Void) {
         title = track.displayName

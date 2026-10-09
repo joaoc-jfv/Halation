@@ -13,5 +13,10 @@ struct HalationApp: App {
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 960, height: 540)
         .commands { AppCommands(player: player) }
+
+        Settings {
+            SubtitleSettingsView()
+                .environment(player)
+        }
     }
 }

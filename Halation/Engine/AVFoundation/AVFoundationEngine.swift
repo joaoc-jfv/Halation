@@ -133,6 +133,10 @@ final class AVFoundationEngine: PlaybackEngine {
         item?.step(byCount: frames)
     }
 
+    var currentTime: Duration {
+        Duration(player.currentTime()) ?? .zero
+    }
+
     var rate: Float {
         get { player.defaultRate }
         set {

@@ -3,7 +3,7 @@
 > **Halation** (n.): the soft glow that forms around bright highlights on film.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core), 1.3 (video surface and window), 1.4 (Liquid Glass controls) and 1.5 (tracks) are done; see §7 for the order of the rest.
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core), 1.3 (video surface and window), 1.4 (Liquid Glass controls), 1.5 (tracks) and 1.6 (sidecar subtitles) are done; see §7 for the order of the rest.
 
 ---
 
@@ -124,7 +124,7 @@ Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/faile
 - **Dependencies:**
   - Phase 1: none (Apple frameworks only: AVFoundation, AVKit, CoreMedia, MediaPlayer, SwiftUI, AppKit).
   - Phase 2+: FFmpeg libraries (libavformat/libavcodec/libavutil) and later libmpv + libass. Preferred source: **MPVKit** (Swift package shipping libmpv, FFmpeg, and libass as xcframeworks). Pick its **LGPL** variant unless we decide to open-source under GPL. *Verify the current package name, maintenance status, and license variants before adding it.*
-- **Entitlements:** App Sandbox; `com.apple.security.files.user-selected.read-only`; `com.apple.security.files.bookmarks.app-scope` (resume and recents across launches via security-scoped bookmarks). Hardened Runtime is enabled in build settings, but Xcode turns it off while signing ad hoc (`CODE_SIGN_IDENTITY: "-"`, used so the project builds without a team). Set a real signing identity for release builds. If phase 2 uses a localhost HTTP server, add `com.apple.security.network.server`. The plan prefers `AVAssetResourceLoader`, which avoids that.
+- **Entitlements:** defined under `entitlements.properties` in `project.yml` (XcodeGen rewrites the `.entitlements` file from them, so editing the file by hand is lost; until 1.6 it had been regenerated empty and the app ran unsandboxed). App Sandbox; `com.apple.security.files.user-selected.read-only`; `com.apple.security.files.bookmarks.app-scope` (resume and recents across launches via security-scoped bookmarks). Hardened Runtime is enabled in build settings, but Xcode turns it off while signing ad hoc (`CODE_SIGN_IDENTITY: "-"`, used so the project builds without a team). Set a real signing identity for release builds. If phase 2 uses a localhost HTTP server, add `com.apple.security.network.server`. The plan prefers `AVAssetResourceLoader`, which avoids that.
 - **Distribution (later):** Developer ID + notarization, Sparkle for updates, GitHub Releases. App Store optional; the sandbox setup above keeps that open.
 
 ### Folder layout
@@ -145,13 +145,14 @@ Halation/
 │   │   └── MPV/            (phase 3)
 │   ├── Media/          CodecNames.swift, LanguageMatching.swift, MediaProbe.swift, HDRDetection.swift, AudioFormatDetection.swift
 │   ├── Player/         PlayerModel.swift, PlayerModel+Shortcuts.swift, TrackSelectionPolicy.swift, MediaTrack+Labels.swift, PlaybackSpeed.swift, Toast.swift, TimeFormatting.swift
-│   ├── Subtitles/      SubtitleCue.swift, SRTParser.swift, WebVTTParser.swift, SubtitleTrackStore.swift
+│   ├── Subtitles/      SubtitleCue.swift, SubtitleDecoding.swift, SRTParser.swift, WebVTTParser.swift, SubtitleMarkup.swift, SubtitleLoader.swift, SidecarSubtitles.swift, SubtitleStyle.swift, SubtitleTrackStore.swift
 │   ├── UI/
-│   │   ├── Player/     PlayerWindowView.swift, VideoSurfaceView.swift, WindowController.swift, WindowSizing.swift, OpenPanel.swift, SubtitleOverlay.swift
+│   │   ├── Player/     PlayerWindowView.swift, VideoSurfaceView.swift, WindowController.swift, WindowSizing.swift, OpenPanel.swift, SubtitleOverlay.swift, SubtitleLayout.swift
+│   │   ├── Settings/   SubtitleSettingsView.swift (⌘, window)
 │   │   ├── Controls/   ControlBar.swift, TrackSlider.swift (scrubber and volume), TrackPanel.swift, TrackPanel.swift, SpeedPanel.swift, CropPanel.swift, VolumeControl.swift
 │   │   ├── HUD/        InfoHUD.swift, FormatBadges.swift (Spatial Audio badge so far), OSDToast.swift
 │   │   └── Welcome/    WelcomeView.swift (drop zone + recents)
-│   ├── Services/       NowPlayingService.swift, ResumeStore.swift, RecentFiles.swift, Preferences.swift, PiPController.swift
+│   ├── Services/       NowPlayingService.swift, ResumeStore.swift, RecentFiles.swift, Preferences.swift, FolderAccess.swift, PiPController.swift
 │   └── Resources/      Assets.xcassets, Info.plist, Halation.entitlements
 └── HalationTests/
 ```
@@ -180,7 +181,9 @@ Halation/
 ### 5.3 Subtitles
 - **Embedded:** from `AVMediaSelectionGroup` for `.legible`. Selecting one uses `AVPlayerItem.select(_:in:)`. "Off" means `nil`. Respect forced subtitles: when "Off", still show forced tracks that match the audio language.
 - **External (sidecar):** auto-load `movie.srt`, `movie.en.srt`, `movie.vtt`, and so on from the same folder. The sandbox needs the user to grant folder access the first time, or use "Add Subtitle File…" in the panel. Parse SRT and WebVTT into `[SubtitleCue]` and render with our own `SubtitleOverlay` (SwiftUI text above the video, synced to the current time with a binary search over cues).
-- **Styling (preferences):** font size (S/M/L/XL), background (none / shadow / box), position offset, and a delay adjustment of ±0.1 s per step (`Z`/`X`).
+- **Styling (preferences):** font size (S/M/L/XL, as a fraction of the video height), background (none / shadow / box), position offset, set in the Settings window (⌘,) with a live preview. The delay is ±0.1 s per step (`Z`/`X`, also in the Subtitles menu), applies only to sidecar tracks, and resets for each file.
+- Implementation notes (1.6): files are decoded as UTF-8 (BOM-aware, UTF-16 too), falling back to Windows-1252. Inline `<i>`, `<b>`, `<u>` are kept and every other tag or ASS override is dropped. Overlapping cues all show. The overlay reads the engine's live playhead about 30 times a second (the 4 Hz `currentTime` would be visibly late), sits in the video's own rectangle rather than the window's, and lifts clear of the control bar while it shows. Sidecars load after playback starts. With no embedded subtitles and no remembered choice, the first sidecar is selected. A remembered language picks the matching sidecar, and Off keeps them listed but hidden.
+- Folder access: listing the video's folder can fail in the sandbox. The panel then offers "Find Subtitles in This Folder…", which asks for the folder and remembers it with an app-scoped security bookmark (`FolderAccess`). "Add Subtitle File…" always works. **Not yet checked in a strictly enforced sandbox:** on the dev Mac, a sandboxed build could still list ~/Documents, so only the failure path (a missing folder) is tested.
 - **ASS/SSA and PGS:** phase 3 via libass and libmpv.
 
 ### 5.4 Audio tracks and channels

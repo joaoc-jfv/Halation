@@ -86,15 +86,32 @@ struct AppCommands: Commands {
             Group {
                 Button("Next Subtitle Track") { player.cycleSubtitlesByShortcut() }
                     .keyboardShortcut("s", modifiers: [])
+                Button("Add Subtitle File…") {
+                    OpenPanel.chooseSubtitleFile { player.addSubtitleFile($0) }
+                }
+                Divider()
+                Button("Subtitle Delay −0.1 s") { player.adjustSubtitleDelayByShortcut(.milliseconds(-100)) }
+                    .keyboardShortcut("z", modifiers: [])
+                Button("Subtitle Delay +0.1 s") { player.adjustSubtitleDelayByShortcut(.milliseconds(100)) }
+                    .keyboardShortcut("x", modifiers: [])
+                Button("Reset Subtitle Delay") { player.resetSubtitleDelay() }
+                    .disabled(player.subtitles.delay == .zero)
+                Divider()
                 Menu("Subtitle Track") {
                     Toggle("Off", isOn: Binding(
-                        get: { player.displayedSubtitle == nil },
+                        get: { !player.hasVisibleSubtitle },
                         set: { _ in player.selectSubtitle(nil) }
                     ))
                     ForEach(player.selectableSubtitleTracks) { track in
                         Toggle(track.displayName, isOn: Binding(
                             get: { track == player.displayedSubtitle },
                             set: { _ in player.selectSubtitle(track) }
+                        ))
+                    }
+                    ForEach(player.subtitles.tracks) { track in
+                        Toggle(track.label, isOn: Binding(
+                            get: { track == player.subtitles.selected },
+                            set: { _ in player.selectExternalSubtitle(track) }
                         ))
                     }
                 }
