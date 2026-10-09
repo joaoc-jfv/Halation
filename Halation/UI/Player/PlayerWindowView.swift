@@ -12,7 +12,8 @@ struct PlayerWindowView: View {
     var body: some View {
         ZStack {
             Color.black
-            if let videoView = player.videoView {
+            // A file that failed mid-playback keeps its video view; don't leave a frozen frame behind the message.
+            if let videoView = player.videoView, player.errorMessage == nil {
                 VideoSurfaceView(
                     videoView: videoView,
                     videoSize: player.mediaInfo?.presentationSize,
@@ -31,6 +32,9 @@ struct PlayerWindowView: View {
                     Color.clear.contentShape(Rectangle()).onTapGesture { player.closePanel() }
                 }
                 controls
+            }
+            if player.isBusy {
+                BusyIndicator()
             }
             toast
         }
@@ -131,5 +135,25 @@ private struct ControlsOverlay: View {
         .padding(.bottom, 20)
         .onHover { player.setPointerOverControls($0) }
         .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: player.activePanel)
+    }
+}
+
+/// A spinner for loading and buffering. It waits a moment first, so quick loads don't flash it.
+private struct BusyIndicator: View {
+    @State private var isShown = false
+
+    var body: some View {
+        ProgressView()
+            .controlSize(.large)
+            .tint(.white)
+            .padding(22)
+            .glassEffect(.regular.tint(.black.opacity(0.35)), in: .circle)
+            .opacity(isShown ? 1 : 0)
+            .task {
+                try? await Task.sleep(for: .milliseconds(400))
+                isShown = true
+            }
+            .accessibilityLabel("Loading")
+            .allowsHitTesting(false)
     }
 }

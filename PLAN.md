@@ -3,7 +3,7 @@
 > **Halation** (n.): the soft glow that forms around bright highlights on film.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core), 1.3 (video surface and window), 1.4 (Liquid Glass controls), 1.5 (tracks), 1.6 (sidecar subtitles), 1.7 (crop, aspect, speed), 1.8 (system integration) and 1.9 (info HUD, welcome, scrub thumbnails) are done; see §7 for the order of the rest.
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** Phase 1 (milestones 1.1 to 1.10) is done: Halation plays MP4, MOV and M4V with everything in §5 and §6. MKV and the other containers are phases 2 and 3 (opening one shows "This format isn't supported yet.").
 
 ---
 
@@ -264,6 +264,7 @@ All shortcuts also appear in the menu bar (Playback, Audio, Subtitles, Video men
 - **Auto-hide:** while playing, hide the controls, traffic lights, and cursor after 2.5 s without mouse movement. Show them again on mouse move or any key. Keep them visible while paused or while a panel is open or the pointer is over the controls.
 - **Empty state (WelcomeView):** a centered glass drop zone, "Drop a video to play", an Open… button, and a grid of recent files with thumbnails and progress bars below it.
 - **Legibility:** put a soft black gradient behind the bottom ~120 pt **only while the controls are visible**, so glass stays readable over very bright HDR highlights. Test on bright snow/sky HDR scenes.
+- Implementation notes (1.10): every animation checks Reduce Motion (SwiftUI ones through the environment value, the AppKit crop and window-chrome ones through `accessibilityDisplayShouldReduceMotion`). Reduce Transparency relies on the glass falling back to an opaque material by itself; our tints sit on top of that. A spinner shows after 0.4 s of loading or buffering. A file that fails, at open or mid-playback, drops its video and shows the message with an Open… button over the recents. The app icon is the Icon Composer bundle `Resources/AppIcon.icon`.
 - **Accessibility:** respect Reduce Transparency and Reduce Motion (glass falls back automatically; also disable morph animations), VoiceOver labels on every control, full keyboard navigation, and Dynamic Type–style sizing for subtitles.
 
 ---

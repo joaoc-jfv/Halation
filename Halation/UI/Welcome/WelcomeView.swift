@@ -3,6 +3,7 @@ import SwiftUI
 /// What shows when nothing is playing: a drop zone and the recent files (PLAN.md §6).
 struct WelcomeView: View {
     @Environment(PlayerModel.self) private var player
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var isDropTargeted = false
 
     var body: some View {
@@ -32,8 +33,8 @@ struct WelcomeView: View {
         .padding(.horizontal, 36)
         .padding(.vertical, 24)
         .glassEffect(.regular.tint(isDropTargeted ? .white.opacity(0.3) : .black.opacity(0.35)), in: .rect(cornerRadius: 28))
-        .scaleEffect(isDropTargeted ? 1.03 : 1)
-        .animation(.smooth(duration: 0.2), value: isDropTargeted)
+        .scaleEffect(isDropTargeted && !reduceMotion ? 1.03 : 1)
+        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: isDropTargeted)
         .accessibilityElement(children: .contain)
     }
 }

@@ -64,6 +64,8 @@ final class PlayerModel {
     }
 
     var isPlaying: Bool { state == .playing }
+    /// Loading the file, or waiting for data while playing.
+    var isBusy: Bool { state == .loading || isBuffering }
     var hasMedia: Bool { currentURL != nil }
     var errorMessage: String? {
         if case .failed(let error) = state { error.localizedDescription } else { nil }
