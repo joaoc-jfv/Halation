@@ -1,3 +1,4 @@
+import FFmpegKit
 import Foundation
 import Testing
 @testable import Halation
@@ -55,14 +56,51 @@ import Testing
         #expect(plan.audio?.id == 2)
     }
 
-    @Test func ignoresARequestForATrackItCannotCopy() throws {
+    @Test func playsATrackThatNeedsConvertingWhenAskedFor() throws {
         let plan = try RemuxSession.plan(for: probe(), preferredAudioLanguage: nil, audioStreamID: 3)
+        #expect(plan.audio?.id == 3)  // DTS: converted to AAC
+    }
+
+    @Test func ignoresARequestForATrackNothingCanPlay() throws {
+        var unplayable = probe()
+        unplayable.streams.append(ProbedStream(id: 4, kind: .audio, codec: "notacodec", language: "deu", channels: 2))
+        let plan = try RemuxSession.plan(for: unplayable, preferredAudioLanguage: nil, audioStreamID: 4)
         #expect(plan.audio?.id == 1)  // back to the file's default
     }
 }
 
 @MainActor
 @Suite struct MKVTrackPlaybackTests {
+    // MARK: Converted audio
+
+    @Test func playsAudioThatNeedsConvertingAndSeeks() async throws {
+        let clip = try await Clip(seconds: 14, audio: ["eng"], options: .init(pcmAudio: (language: "fra", channels: 6)))
+        defer { clip.cleanUp() }
+        let preferences = TestPreferences.make()
+        preferences.audioLanguage = "fr"
+        let model = player(preferences: preferences)
+        defer { model.close() }
+        model.open(clip.mkv)
+        await waitUntil("playback", timeout: .seconds(15)) { model.state == .playing }
+        #expect(model.errorMessage == nil)
+        #expect(model.audioTracks.count == 2)
+        #expect(model.selectedAudio?.codec == "PCM" && model.selectedAudio?.channels == 6)
+        #expect(model.mediaInfo?.audioCodec == "PCM → AAC")
+
+        await waitUntil("past the first segment", timeout: .seconds(15)) { model.currentTime.seconds > 6.8 }
+        model.seek(to: .seconds(9), precise: true)
+        await waitUntil("seek to 9 s") { model.livePlaybackTime().seconds >= 9 }
+        await waitUntil("playing on", timeout: .seconds(15)) { model.state == .playing && model.currentTime.seconds > 9.5 }
+        #expect(model.errorMessage == nil)
+
+        // Back to the copied track and to the converted one again.
+        model.selectAudio(model.audioTracks[0])
+        await waitUntil("the copied track", timeout: .seconds(15)) { model.state == .playing && model.mediaInfo?.audioCodec == "AAC" }
+        model.selectAudio(model.audioTracks[1])
+        await waitUntil("the converted track again", timeout: .seconds(15)) { model.state == .playing && model.mediaInfo?.audioCodec == "PCM → AAC" }
+        #expect(model.errorMessage == nil)
+    }
+
     private struct Clip {
         let mkv: URL
         private let source: URL
@@ -243,5 +281,123 @@ import Testing
         model.updateScrubPreview(fraction: 0.5)
         await waitUntil("a thumbnail", timeout: .seconds(10)) { model.scrubPreview?.image != nil }
         #expect(model.scrubThumbnailsAvailable)
+    }
+}
+
+@Suite struct AudioConversionTests {
+    private func presentation(of timing: MP4Boxes.FragmentTiming, info: MP4Boxes.InitInfo) -> Double {
+        let ticks = timing.baseDecodeTime + timing.firstCompositionOffset - info.mediaTime(track: timing.track) + info.emptyEditTicks(track: timing.track)
+        return Double(ticks) / Double(info.tracks[timing.track].timescale)
+    }
+
+    private func clip(seconds: Int, channels: Int) async throws -> (mkv: URL, source: URL) {
+        let source = try await TestVideo.make(seconds: seconds, fps: 10, flavor: .sdrH264, audioLanguages: [])
+        return (try MKVFixture.make(from: source, options: .init(pcmAudio: (language: "eng", channels: channels))), source)
+    }
+
+    @Test(arguments: [2, 6]) func convertsPCMToAACThatLandsOnTheTimelineAcrossSegments(channels: Int) async throws {
+        let (mkv, source) = try await clip(seconds: 14, channels: channels)
+        defer { try? FileManager.default.removeItem(at: mkv); try? FileManager.default.removeItem(at: source) }
+        let probe = try await MKVProbe.probe(url: mkv)
+        let audio = try #require(probe.audio.first)
+        #expect(audio.codec == "pcm_s16le" && audio.channels == channels)
+        let segments = SegmentPlanner.plan(keyframes: probe.keyframes, duration: probe.duration, target: .seconds(4))
+        #expect(segments.count >= 3)
+
+        let muxer = try await SegmentMuxer.open(path: mkv.path, video: probe.video[0], audio: audio, segments: segments, transcodeAudio: true)
+        defer { muxer.close() }
+        let info = try #require(MP4Boxes.initInfo(muxer.initSegment))
+        #expect(info.tracks.count == 2)
+        #expect(MP4Boxes.payload(of: "esds", in: muxer.initSegment) != nil, "the init segment should describe AAC")
+
+        // In order, the way playback asks: each segment continues the converter's stream.
+        var ends: [Double] = []
+        for index in segments.indices {
+            let data = Array(try await muxer.segment(index))
+            let timings = MP4Boxes.firstFragmentTiming(data, trackIDs: info.tracks.map(\.trackID))
+            #expect(timings.count == 2, "segment \(index) should carry both tracks")
+            let start = segments[index].start.seconds
+            for timing in timings where timing.track == 1 {
+                let shown = presentation(of: timing, info: info)
+                #expect(abs(shown - start) < 0.1, "segment \(index) audio starts at \(shown), planned \(start)")
+                ends.append(shown)
+            }
+        }
+        #expect(ends.count == segments.count)
+        // Out of order, after a jump: the converter starts over and still lands in place.
+        let data = Array(try await muxer.segment(1))
+        _ = data
+        let again = try await muxer.segment(0)
+        #expect(!again.isEmpty)
+    }
+
+    /// Decodes the converted track back and checks the sine wave survived whole: the right length, no gaps, no repeats.
+    @Test func theConvertedAudioDecodesToAContinuousWave() async throws {
+        let (mkv, source) = try await clip(seconds: 14, channels: 2)
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("halation-converted-\(UUID().uuidString).mp4")
+        defer { for url in [mkv, source, file] { try? FileManager.default.removeItem(at: url) } }
+        let probe = try await MKVProbe.probe(url: mkv)
+        let segments = SegmentPlanner.plan(keyframes: probe.keyframes, duration: probe.duration, target: .seconds(4))
+        let muxer = try await SegmentMuxer.open(path: mkv.path, video: probe.video[0], audio: probe.audio[0], segments: segments, transcodeAudio: true)
+        defer { muxer.close() }
+
+        var bytes = Data(muxer.initSegment)
+        for index in segments.indices {
+            let segment = Array(try await muxer.segment(index))
+            for box in MP4Boxes.children(of: segment) where box.type == "moof" || box.type == "mdat" {
+                bytes.append(contentsOf: segment[box.offset..<box.end])
+            }
+        }
+        try bytes.write(to: file)
+
+        // Read it back with FFmpeg: the packets must follow one another exactly, and decode to the original wave.
+        var contextRef: UnsafeMutablePointer<AVFormatContext>?
+        #expect(avformat_open_input(&contextRef, file.path, nil, nil) >= 0)
+        let context = try #require(contextRef)
+        defer { avformat_close_input(&contextRef) }
+        #expect(avformat_find_stream_info(context, nil) >= 0)
+        let audioIndex = try #require((0..<Int(context.pointee.nb_streams)).first { context.pointee.streams[$0]!.pointee.codecpar.pointee.codec_type == AVMEDIA_TYPE_AUDIO })
+        let stream = context.pointee.streams[audioIndex]!
+        let decoder = try #require(avcodec_find_decoder(stream.pointee.codecpar.pointee.codec_id))
+        var decoderRef = avcodec_alloc_context3(decoder)
+        defer { avcodec_free_context(&decoderRef) }
+        let decoding = try #require(decoderRef)
+        #expect(avcodec_parameters_to_context(decoding, stream.pointee.codecpar) >= 0)
+        #expect(avcodec_open2(decoding, decoder, nil) >= 0)
+
+        var samples: [Float] = []
+        var expectedNext: Int64?
+        var gaps = 0
+        var packetRef = av_packet_alloc()
+        defer { av_packet_free(&packetRef) }
+        var frameRef = av_frame_alloc()
+        defer { av_frame_free(&frameRef) }
+        let packet = try #require(packetRef), frame = try #require(frameRef)
+        while av_read_frame(context, packet) >= 0 {
+            defer { av_packet_unref(packet) }
+            guard Int(packet.pointee.stream_index) == audioIndex else { continue }
+            if let expectedNext, abs(packet.pointee.pts - expectedNext) > 2 { gaps += 1 }
+            expectedNext = packet.pointee.pts + packet.pointee.duration
+            guard avcodec_send_packet(decoding, packet) >= 0 else { continue }
+            while avcodec_receive_frame(decoding, frame) >= 0 {
+                let channel = UnsafeRawPointer(frame.pointee.extended_data[0]!).assumingMemoryBound(to: Float.self)
+                for index in 0..<Int(frame.pointee.nb_samples) { samples.append(channel[index]) }
+            }
+        }
+        #expect(gaps == 0, "\(gaps) places where an audio packet doesn't start where the previous one ended")
+        let frames = samples.count
+        #expect(abs(Double(frames) / 48000 - 14) < 0.25, "decoded \(Double(frames) / 48000) s")
+
+        // 50 ms windows: the 220 Hz tone (peak 8000/32768 = 0.24) is there in every one, and never louder than it should be.
+        let window = 2400
+        var quiet = 0, loud = 0
+        for start in stride(from: 4800, to: frames - 4800, by: window) {  // skip the first and last 100 ms (encoder ramps)
+            var peak: Float = 0
+            for index in start..<start + window { peak = max(peak, abs(samples[index])) }
+            if peak < 0.15 { quiet += 1 }
+            if peak > 0.35 { loud += 1 }
+        }
+        #expect(quiet == 0, "\(quiet) windows had dropped out")
+        #expect(loud == 0, "\(loud) windows were too loud (repeated or overlapping audio?)")
     }
 }

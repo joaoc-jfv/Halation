@@ -28,6 +28,8 @@ final class SegmentMuxer: @unchecked Sendable {
     private let segments: [SegmentSpec]
     private let videoIndex: Int
     private let audioIndex: Int?
+    /// Set when the audio can't be copied; every cut then converts it to AAC.
+    private var transcoder: AudioTranscoder?
     private let origin: Double
     private let initInfo: MP4Boxes.InitInfo
     private var input: UnsafeMutablePointer<AVFormatContext>?
@@ -37,15 +39,15 @@ final class SegmentMuxer: @unchecked Sendable {
     private static let cacheLimit = 160 * 1024 * 1024
 
     /// Opens the file, and cuts segment 0 to get the init segment.
-    static func open(path: String, video: ProbedStream, audio: ProbedStream?, segments: [SegmentSpec]) async throws -> SegmentMuxer {
+    static func open(path: String, video: ProbedStream, audio: ProbedStream?, segments: [SegmentSpec], transcodeAudio: Bool = false) async throws -> SegmentMuxer {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue(label: "halation.segment-muxer.open", qos: .userInitiated).async {
-                continuation.resume(with: Result { try SegmentMuxer(path: path, video: video, audio: audio, segments: segments) })
+                continuation.resume(with: Result { try SegmentMuxer(path: path, video: video, audio: audio, segments: segments, transcodeAudio: transcodeAudio) })
             }
         }
     }
 
-    private init(path: String, video: ProbedStream, audio: ProbedStream?, segments: [SegmentSpec]) throws {
+    private init(path: String, video: ProbedStream, audio: ProbedStream?, segments: [SegmentSpec], transcodeAudio: Bool) throws {
         guard let first = segments.first else { throw Failure.cannotCut("the file has no video keyframes") }
         self.segments = segments
         videoIndex = video.id
@@ -64,10 +66,16 @@ final class SegmentMuxer: @unchecked Sendable {
             context.pointee.streams[index]?.pointee.discard = AVDISCARD_ALL
         }
         input = context
+        if transcodeAudio, let audio {
+            do { transcoder = try AudioTranscoder(stream: audio, from: context) } catch {
+                avformat_close_input(&input)
+                throw error
+            }
+        }
 
         // Segment 0 is cut with the same code as every other; its leading boxes are the init segment.
         let cut: Cut
-        do { cut = try Self.cut(first, from: context, videoIndex: video.id, audioIndex: audio?.id) } catch {
+        do { cut = try Self.cut(first, from: context, videoIndex: video.id, audioIndex: audio?.id, transcoder: transcoder) } catch {
             avformat_close_input(&input)
             throw error
         }
@@ -92,6 +100,8 @@ final class SegmentMuxer: @unchecked Sendable {
     func close() {
         queue.sync {
             if input != nil { avformat_close_input(&input) }
+            transcoder?.close()
+            transcoder = nil
             cache = [:]
             cacheOrder = []
             cachedBytes = 0
@@ -117,7 +127,7 @@ final class SegmentMuxer: @unchecked Sendable {
                     guard let input else { throw Failure.cannotCut("the file was closed") }
                     let length = Duration.milliseconds(600)
                     let spec = SegmentSpec(index: 0, start: keyframe, end: keyframe + length, duration: length)
-                    return Data(try Self.cut(spec, from: input, videoIndex: videoIndex, audioIndex: nil).bytes)
+                    return Data(try Self.cut(spec, from: input, videoIndex: videoIndex, audioIndex: nil, transcoder: nil).bytes)
                 })
             }
         }
@@ -131,7 +141,7 @@ final class SegmentMuxer: @unchecked Sendable {
         }
         guard let input else { throw Failure.cannotCut("the file was closed") }
         let spec = segments[index]
-        let cut = try Self.cut(spec, from: input, videoIndex: videoIndex, audioIndex: audioIndex)
+        let cut = try Self.cut(spec, from: input, videoIndex: videoIndex, audioIndex: audioIndex, transcoder: transcoder)
         let raw = cut.bytes
         guard let firstFragment = MP4Boxes.children(of: raw).first(where: { $0.type == "moof" }) else {
             throw Failure.cannotCut("segment \(index) is empty")
@@ -163,10 +173,12 @@ final class SegmentMuxer: @unchecked Sendable {
 
     /// Seeks to `spec.start` and muxes video and audio up to `spec.end` with a fresh muxer. Returns ftyp, moov and the
     /// fragments, as the muxer wrote them (timestamps rebased to zero).
-    private static func cut(_ spec: SegmentSpec, from input: UnsafeMutablePointer<AVFormatContext>, videoIndex: Int, audioIndex: Int?) throws -> Cut {
+    private static func cut(_ spec: SegmentSpec, from input: UnsafeMutablePointer<AVFormatContext>, videoIndex: Int, audioIndex: Int?, transcoder: AudioTranscoder?) throws -> Cut {
         let start = spec.start.seconds
         let end = spec.end?.seconds
         let videoStream = input.pointee.streams[videoIndex]!
+        // Converted audio carries on from the previous segment when this one follows it; after a jump it starts cold.
+        if let transcoder, transcoder.resumeTime != spec.start { transcoder.reset() }
         // Half a millisecond past the keyframe, so seeking backwards lands on it and not on the one before.
         let seekTarget = Int64((start + 0.0005) / av_q2d(videoStream.pointee.time_base))
         guard av_seek_frame(input, Int32(videoIndex), seekTarget, AVSEEK_FLAG_BACKWARD) >= 0 else { throw Failure.cannotCut("seeking failed") }
@@ -180,7 +192,8 @@ final class SegmentMuxer: @unchecked Sendable {
         for index in [videoIndex] + (audioIndex.map { [$0] } ?? []) {
             let stream = input.pointee.streams[index]!
             guard let out = avformat_new_stream(output, nil) else { throw Failure.cannotCut("out of memory") }
-            code = avcodec_parameters_copy(out.pointee.codecpar, stream.pointee.codecpar)
+            let converted = index == audioIndex ? transcoder : nil
+            code = avcodec_parameters_copy(out.pointee.codecpar, converted?.outputParameters ?? stream.pointee.codecpar)
             guard code >= 0 else { throw Failure.cannotCut(message(code)) }
             let parameters = out.pointee.codecpar!
             parameters.pointee.codec_tag = parameters.pointee.codec_id == AV_CODEC_ID_HEVC ? fourCC("hvc1") : 0
@@ -193,7 +206,7 @@ final class SegmentMuxer: @unchecked Sendable {
                 }
             }
             av_dict_copy(&out.pointee.metadata, stream.pointee.metadata, 0)
-            out.pointee.time_base = stream.pointee.time_base
+            out.pointee.time_base = converted.map { AVRational(num: 1, den: Int32($0.format.sampleRate)) } ?? stream.pointee.time_base
             outputIndex[index] = out.pointee.index
         }
         // The mp4 muxer only writes the Dolby Vision configuration box (dvcC/dvvC) when strictness is "unofficial".
@@ -230,6 +243,16 @@ final class SegmentMuxer: @unchecked Sendable {
         var firstAudio: Double?
         var videoDone = false, audioDone = audioIndex == nil
         let noPTS = Int64.min
+        // Writes one AAC packet from the converter, which stamps its packets in 1/sampleRate on the file's own timeline.
+        func writeConverted(_ encoded: UnsafeMutablePointer<AVPacket>) throws {
+            guard let audioIndex, let mapped = outputIndex[audioIndex], let transcoder else { return }
+            if firstAudio == nil { firstAudio = Double(encoded.pointee.pts) / Double(transcoder.format.sampleRate) }
+            encoded.pointee.stream_index = mapped
+            let timeBase = AVRational(num: 1, den: Int32(transcoder.format.sampleRate))
+            av_packet_rescale_ts(encoded, timeBase, output.pointee.streams[Int(mapped)]!.pointee.time_base)
+            let code = av_interleaved_write_frame(output, encoded)
+            guard code >= 0 else { throw Failure.cannotCut(message(code)) }
+        }
 
         while !(videoDone && audioDone), av_read_frame(input, packet) >= 0 {
             defer { av_packet_unref(packet) }
@@ -247,6 +270,11 @@ final class SegmentMuxer: @unchecked Sendable {
             } else {
                 if time < start - 0.001 { continue }
                 if let end, time >= end - 0.001 { audioDone = true; continue }
+                if let transcoder {
+                    guard firstVideo != nil else { continue }
+                    try transcoder.process(packet, emit: writeConverted)
+                    continue
+                }
                 if firstAudio == nil { firstAudio = time }
             }
             guard firstVideo != nil else { continue }  // audio ahead of the first video keyframe
@@ -254,6 +282,11 @@ final class SegmentMuxer: @unchecked Sendable {
             av_packet_rescale_ts(packet, stream.pointee.time_base, output.pointee.streams[Int(mapped)]!.pointee.time_base)
             code = av_interleaved_write_frame(output, packet)
             guard code >= 0 else { throw Failure.cannotCut(message(code)) }
+        }
+        if let transcoder {
+            // The last segment drains the converter; every other one leaves its state for the segment that follows.
+            if end == nil { try transcoder.process(nil, emit: writeConverted) }
+            transcoder.resumeTime = spec.end
         }
         code = av_write_trailer(output)
         guard code >= 0 else { throw Failure.cannotCut(message(code)) }

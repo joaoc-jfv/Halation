@@ -12,7 +12,7 @@ Requires macOS 26 or later. [PLAN.md](PLAN.md) holds the architecture, the featu
 - **Picture controls**: crop presets that remove letterbox bars, aspect-ratio overrides, fit/fill zoom, and speed from 0.25× to 4×.
 - **The rest**: chapters, Picture in Picture, resume where you stopped, Open Recent, Now Playing and media keys, scrub thumbnails, an info panel (`I`), and a floating Liquid Glass control bar that fades out while you watch.
 
-MKV and WebM play by remuxing on the fly (HEVC/H.264 video with AAC, AC-3, E-AC-3, ALAC or FLAC audio), with audio switching, text subtitles and scrub previews. Other containers, and audio such as DTS or TrueHD, are not supported yet (see `PLAN.md`); opening one says so.
+MKV and WebM play by remuxing on the fly (HEVC or H.264 video; AAC, AC-3, E-AC-3, ALAC and FLAC audio is copied as it is, and DTS, TrueHD, Opus, MP3 and the like are converted to AAC), with audio switching, text subtitles and scrub previews. Other containers and video codecs (VP9, AV1, MPEG-4) are not supported yet (see `PLAN.md`); opening one says so.
 
 ## Keyboard
 

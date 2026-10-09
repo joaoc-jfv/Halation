@@ -172,6 +172,36 @@ enum MKVProbe {
         return times.sorted().filter { seen.insert(Int64(($0 * 1000).rounded())).inserted }.map { .seconds(max(0, $0)) }
     }
 
+    /// For a file without Cues: reads the whole file once and notes where every video keyframe starts. Slow on a big file
+    /// (it has to read all of it), so it is only used when the file has no index of its own. Runs off the calling actor.
+    static func scanKeyframes(url: URL, videoIndex: Int) async throws -> [Duration] {
+        let path = url.path
+        return try await Task.detached(priority: .userInitiated) { try scanKeyframes(path: path, videoIndex: videoIndex) }.value
+    }
+
+    static func scanKeyframes(path: String, videoIndex: Int) throws -> [Duration] {
+        var opened: UnsafeMutablePointer<AVFormatContext>?
+        let code = avformat_open_input(&opened, path, nil, nil)
+        guard code >= 0, let context = opened else { throw Failure.cannotOpen(message(for: code)) }
+        defer { avformat_close_input(&opened) }
+        guard videoIndex < Int(context.pointee.nb_streams), let video = context.pointee.streams[videoIndex] else { return [] }
+        for index in 0..<Int(context.pointee.nb_streams) where index != videoIndex { context.pointee.streams[index]?.pointee.discard = AVDISCARD_ALL }
+        guard let packet = av_packet_alloc() else { return [] }
+        defer { var owned: UnsafeMutablePointer<AVPacket>? = packet; av_packet_free(&owned) }
+
+        let timeBase = av_q2d(video.pointee.time_base)
+        var times: [Double] = []
+        while av_read_frame(context, packet) >= 0 {
+            defer { av_packet_unref(packet) }
+            if Task.isCancelled { throw CancellationError() }
+            guard Int(packet.pointee.stream_index) == videoIndex, packet.pointee.flags & AV_PKT_FLAG_KEY != 0 else { continue }
+            let stamp = packet.pointee.pts != Int64.min ? packet.pointee.pts : packet.pointee.dts
+            if stamp != Int64.min { times.append(Double(stamp) * timeBase) }
+        }
+        var seen = Set<Int64>()
+        return times.sorted().filter { seen.insert(Int64(($0 * 1000).rounded())).inserted }.map { .seconds(max(0, $0)) }
+    }
+
     /// Whether `keyframes` really is the file's index and not what probing happened to read from the start.
     /// A real index (the Cues) reaches near the end; a partial one stops after the first few seconds.
     static func isCompleteIndex(_ keyframes: [Duration], duration: Duration) -> Bool {

@@ -71,6 +71,32 @@ import Testing
         }
     }
 
+    @Test func scanningFindsTheSameKeyframesAsTheCues() async throws {
+        let source = try await mp4(seconds: 6)
+        let url = try mkv(source)
+        defer { cleanUp(source, url) }
+        let indexed = try await MKVProbe.probe(url: url)
+        let scanned = try await MKVProbe.scanKeyframes(url: url, videoIndex: indexed.video[0].id)
+        #expect(scanned.count == indexed.keyframes.count)
+        for (a, b) in zip(scanned, indexed.keyframes) { #expect(abs(a.seconds - b.seconds) < 0.002) }
+    }
+
+    @Test func aScanFindsEveryKeyframeOfAFileWithoutCues() async throws {
+        let source = try await mp4(seconds: 8)
+        let url = try mkv(source, .init(withoutCues: true))
+        let indexedURL = try mkv(source)
+        defer { cleanUp(source, url, indexedURL) }
+        // Whatever the probe could read from the start of a file this small, the scan finds all of them.
+        let scanned = try await MKVProbe.scanKeyframes(url: url, videoIndex: 0)
+        let reference = try await MKVProbe.probe(url: indexedURL).keyframes
+        #expect(scanned.count == reference.count, "scanned \(scanned.count), indexed \(reference.count)")
+        for (a, b) in zip(scanned, reference) { #expect(abs(a.seconds - b.seconds) < 0.002) }
+        // And the session plays it from a plan built on either.
+        let session = try await RemuxSession.start(url: url, preferredAudioLanguage: nil)
+        defer { session.stop() }
+        #expect(session.segments.count >= 1)
+    }
+
     @Test func onlyAnIndexThatReachesTheEndCounts() {
         let hour: Duration = .seconds(3600)
         #expect(MKVProbe.isCompleteIndex([.zero, .seconds(3.5), .seconds(7), .seconds(3590)], duration: hour))

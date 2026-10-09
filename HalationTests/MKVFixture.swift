@@ -12,6 +12,8 @@ enum MKVFixture {
         var subtitle: (language: String, forced: Bool)?
         /// Adds an ASS track (language) with three events: styled text over two lines, a vector drawing, and text with a comma.
         var assSubtitle: String?
+        /// Adds an uncompressed PCM audio track (a sine wave, 48 kHz) that AVPlayer can't take as it is, so the remuxer has to convert it.
+        var pcmAudio: (language: String, channels: Int)?
         /// Live mode writes no Cues, like a file recorded without an index.
         var withoutCues = false
     }
@@ -61,6 +63,23 @@ enum MKVFixture {
             subtitleStream = stream
         }
 
+        var pcmStream: UnsafeMutablePointer<AVStream>?
+        if let pcm = options.pcmAudio {
+            let stream = avformat_new_stream(output, nil)!
+            let parameters = stream.pointee.codecpar!
+            parameters.pointee.codec_type = AVMEDIA_TYPE_AUDIO
+            parameters.pointee.codec_id = AV_CODEC_ID_PCM_S16LE
+            parameters.pointee.format = AV_SAMPLE_FMT_S16.rawValue
+            parameters.pointee.sample_rate = 48000
+            parameters.pointee.bits_per_coded_sample = 16
+            parameters.pointee.block_align = Int32(2 * pcm.channels)
+            parameters.pointee.bit_rate = Int64(48000 * 16 * pcm.channels)
+            av_channel_layout_default(&parameters.pointee.ch_layout, Int32(pcm.channels))
+            stream.pointee.time_base = AVRational(num: 1, den: 48000)
+            av_dict_set(&stream.pointee.metadata, "language", pcm.language, 0)
+            pcmStream = stream
+        }
+
         var assStream: UnsafeMutablePointer<AVStream>?
         if let language = options.assSubtitle {
             let stream = avformat_new_stream(output, nil)!
@@ -95,6 +114,34 @@ enum MKVFixture {
             try check(av_interleaved_write_frame(output, packet), "write subtitle")
         }
 
+        // PCM goes in step with the video, as in a real file, so a cut can find audio next to the keyframe it seeks to.
+        var pcmChunk = 0
+        func writePCM(upTo seconds: Double) throws {
+            guard let pcmStream, let pcm = options.pcmAudio else { return }
+            let packet = av_packet_alloc()!
+            defer { var owned: UnsafeMutablePointer<AVPacket>? = packet; av_packet_free(&owned) }
+            let total = Double(input.pointee.duration) / Double(AV_TIME_BASE)
+            let chunk = 1024
+            let timeBase = pcmStream.pointee.time_base
+            while Double(pcmChunk * chunk) / 48000 <= min(seconds, total), pcmChunk < Int(total * 48000) / chunk {
+                var samples = [Int16]()
+                samples.reserveCapacity(chunk * pcm.channels)
+                for frame in 0..<chunk {
+                    let t = Double(pcmChunk * chunk + frame) / 48000
+                    for channel in 0..<pcm.channels { samples.append(Int16(8000 * sin(2 * .pi * (220 + 110 * Double(channel)) * t))) }
+                }
+                try check(av_new_packet(packet, Int32(samples.count * 2)), "packet")
+                samples.withUnsafeBytes { packet.pointee.data.update(from: $0.bindMemory(to: UInt8.self).baseAddress!, count: $0.count) }
+                packet.pointee.stream_index = pcmStream.pointee.index
+                let pts = av_rescale_q(Int64(pcmChunk * chunk), AVRational(num: 1, den: 48000), timeBase)
+                packet.pointee.pts = pts
+                packet.pointee.dts = pts
+                packet.pointee.duration = av_rescale_q(Int64(chunk), AVRational(num: 1, den: 48000), timeBase)
+                try check(av_interleaved_write_frame(output, packet), "write pcm")
+                pcmChunk += 1
+            }
+        }
+
         if let assStream {
             let packet = av_packet_alloc()!
             defer { var owned: UnsafeMutablePointer<AVPacket>? = packet; av_packet_free(&owned) }
@@ -121,10 +168,12 @@ enum MKVFixture {
             defer { av_packet_unref(packet) }
             let inputStream = input.pointee.streams[Int(packet.pointee.stream_index)]!
             guard let mapped = outputIndex[packet.pointee.stream_index] else { continue }
+            try writePCM(upTo: Double(packet.pointee.pts) * av_q2d(inputStream.pointee.time_base))
             packet.pointee.stream_index = mapped
             av_packet_rescale_ts(packet, inputStream.pointee.time_base, output.pointee.streams[Int(mapped)]!.pointee.time_base)
             try check(av_interleaved_write_frame(output, packet), "write")
         }
+        try writePCM(upTo: .infinity)
         try check(av_write_trailer(output), "trailer")
         avio_closep(&output.pointee.pb)
         return target

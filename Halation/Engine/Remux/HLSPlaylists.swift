@@ -38,10 +38,12 @@ enum HLSPlaylists {
 
     /// Builds the variant from what the file says and what the muxer actually wrote into the init segment.
     /// Nil if the codec can't be described (the caller then fails with a clear message).
-    static func variant(video: ProbedStream, audio: ProbedStream?, initSegment: [UInt8], fileBytes: Int64, duration: Duration) -> Variant? {
+    static func variant(
+        video: ProbedStream, audio: ProbedStream?, audioConverted: Bool = false, initSegment: [UInt8], fileBytes: Int64, duration: Duration
+    ) -> Variant? {
         var audioCodec: String?
         if let audio {
-            audioCodec = audioCodecString(audio.codec)
+            audioCodec = audioConverted ? AudioTranscoder.Format.codecString : audioCodecString(audio.codec)
             guard audioCodec != nil else { return nil }
         }
         var videoCodec: String?

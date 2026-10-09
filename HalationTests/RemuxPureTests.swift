@@ -223,10 +223,11 @@ enum BoxBuilder {
         #expect(RemuxSupport.chooseAudio(from: [audio(5, "aac", "jpn")], preferredLanguage: nil)?.id == 5)
     }
 
-    @Test func skipsAudioThatCannotBeCopied() {
+    @Test func prefersAudioThatCanBeCopiedAndConvertsTheRestOnlyWhenNothingElseIsLeft() {
         let streams = [audio(1, "dts", "eng", isDefault: true), audio(2, "truehd", "eng"), audio(3, "ac3", "eng")]
         #expect(RemuxSupport.chooseAudio(from: streams, preferredLanguage: "en")?.id == 3)
-        #expect(RemuxSupport.chooseAudio(from: [audio(1, "dts", "eng")], preferredLanguage: "en") == nil)
+        #expect(RemuxSupport.chooseAudio(from: [audio(1, "dts", "eng")], preferredLanguage: "en")?.id == 1)
+        #expect(RemuxSupport.chooseAudio(from: [audio(1, "notacodec", "eng")], preferredLanguage: "en") == nil)
     }
 
     @Test func listsWhatCanBeCopied() {
@@ -256,11 +257,27 @@ enum BoxBuilder {
             do { _ = try RemuxSession.plan(for: probe, preferredAudioLanguage: nil); return nil } catch { return error.localizedDescription }
         }
         #expect(message(probe(video: "vp9")) == "This file's video (VP9) isn't supported yet.")
-        #expect(message(probe(audio: ["dts", "truehd"])) == "This file's audio (DTS, TRUEHD) isn't supported yet.")
+        #expect(message(probe(audio: ["notacodec", "alsonot"])) == "This file's audio (ALSONOT, NOTACODEC) isn't supported yet.")
         #expect(message(probe(keyframes: [])) == "This file has no seek index, which isn't supported yet.")
         var noVideo = probe()
         noVideo.streams.removeFirst()
         #expect(message(noVideo) == "This file has no video.")
+    }
+
+    @Test func audioAVPlayerCannotPlayIsConvertedAndNeverBeatsOneThatCanBeCopied() throws {
+        for codec in ["dts", "truehd", "opus", "vorbis", "mp3", "pcm_s16le"] {
+            #expect(RemuxSupport.canTranscodeAudio(codec: codec), "\(codec) should be convertible")
+            #expect(try RemuxSession.plan(for: probe(audio: [codec]), preferredAudioLanguage: nil).audio?.id == 1)
+        }
+        #expect(!RemuxSupport.canTranscodeAudio(codec: "eac3"))  // copied, not converted
+        #expect(!RemuxSupport.canTranscodeAudio(codec: "notacodec"))
+        // TrueHD first and default, an AC-3 core in the same language after it: the core plays as it is.
+        let plan = try RemuxSession.plan(for: probe(audio: ["truehd", "ac3"]), preferredAudioLanguage: "en")
+        #expect(plan.audio?.codec == "ac3")
+        // A language the user asked for still wins over the copy-first rule.
+        var mixed = probe(audio: ["ac3", "dts"])
+        mixed.streams[2].language = "ita"
+        #expect(try RemuxSession.plan(for: mixed, preferredAudioLanguage: "it").audio?.codec == "dts")
     }
 
     @Test func aFileWithoutAudioStillPlansVideoOnly() throws {

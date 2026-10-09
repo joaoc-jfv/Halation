@@ -68,7 +68,7 @@ final class RemuxEngine: PlaybackEngine {
         self.session = session
         self.url = url
         probe = session.probe
-        audioStreams = session.probe.audio.filter { RemuxSupport.canCopyAudio(codec: $0.codec) }
+        audioStreams = session.probe.audio.filter { RemuxSupport.canPlayAudio(codec: $0.codec) }
         currentAudioID = session.audio?.id
         if let track = session.audioTrack, let id = session.audio?.id { spatialFlags[id] = track.isSpatial }
         subtitleStreams = session.probe.subtitles.filter { MKVSubtitleReader.isTextCodec($0.codec) }

@@ -1,3 +1,4 @@
+import FFmpegKit
 import Foundation
 
 struct SegmentSpec: Equatable, Sendable {
@@ -50,10 +51,20 @@ enum RemuxSupport {
         ["aac", "ac3", "eac3", "alac", "flac"].contains(codec)
     }
 
-    /// The audio track to play: among those that can be copied, the preferred language, else the file's default, else the first.
+    /// Audio AVPlayer can't play but FFmpeg can decode (DTS, TrueHD, Opus, MP3, Vorbis, PCM, ...): it is converted to AAC.
+    static func canTranscodeAudio(codec: String) -> Bool {
+        guard !canCopyAudio(codec: codec), let descriptor = avcodec_descriptor_get_by_name(codec) else { return false }
+        return avcodec_find_decoder(descriptor.pointee.id) != nil
+    }
+
+    static func canPlayAudio(codec: String) -> Bool { canCopyAudio(codec: codec) || canTranscodeAudio(codec: codec) }
+
+    /// The audio track to play: the preferred language, else the file's default, else the first. Tracks that play as they are
+    /// win over tracks that need converting (an AC-3 core beats a TrueHD track in the same language).
     static func chooseAudio(from streams: [ProbedStream], preferredLanguage: String?) -> ProbedStream? {
-        let usable = streams.filter { $0.kind == .audio && canCopyAudio(codec: $0.codec) }
-        if let preferredLanguage, let match = usable.first(where: { LanguageMatching.matches($0.language, preferredLanguage) }) {
+        let usable = streams.filter { $0.kind == .audio && canPlayAudio(codec: $0.codec) }
+        let ranked = usable.filter { canCopyAudio(codec: $0.codec) } + usable.filter { !canCopyAudio(codec: $0.codec) }
+        if let preferredLanguage, let match = ranked.first(where: { LanguageMatching.matches($0.language, preferredLanguage) }) {
             return match
         }
         return usable.first(where: \.isDefault) ?? usable.first

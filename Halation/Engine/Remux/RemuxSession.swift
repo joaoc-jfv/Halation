@@ -36,14 +36,19 @@ final class RemuxSession: @unchecked Sendable {
     /// Pass the `probe` of an earlier session on the same file to skip probing it again (switching audio tracks), and
     /// `audioStreamID` to play that track instead of choosing one.
     static func start(url: URL, probe knownProbe: MKVProbeResult? = nil, audioStreamID: Int? = nil, preferredAudioLanguage: String?) async throws -> RemuxSession {
-        let probe = if let knownProbe { knownProbe } else { try await MKVProbe.probe(url: url) }
+        var probe = if let knownProbe { knownProbe } else { try await MKVProbe.probe(url: url) }
+        if probe.keyframes.isEmpty, let video = probe.video.first, RemuxSupport.canCopyVideo(codec: video.codec) {
+            // No Cues: the keyframes have to be found by reading the file.
+            probe.keyframes = try await MKVProbe.scanKeyframes(url: url, videoIndex: video.id)
+        }
         let plan = try plan(for: probe, preferredAudioLanguage: preferredAudioLanguage, audioStreamID: audioStreamID)
         try Task.checkCancellation()
 
-        let muxer = try await SegmentMuxer.open(path: url.path, video: plan.video, audio: plan.audio, segments: plan.segments)
+        let converted = plan.audio.map { !RemuxSupport.canCopyAudio(codec: $0.codec) } ?? false
+        let muxer = try await SegmentMuxer.open(path: url.path, video: plan.video, audio: plan.audio, segments: plan.segments, transcodeAudio: converted)
         let fileBytes = (try? FileManager.default.attributesOfItem(atPath: url.path)[.size] as? Int64) ?? 0
         guard let variant = HLSPlaylists.variant(
-            video: plan.video, audio: plan.audio, initSegment: muxer.initSegment, fileBytes: fileBytes, duration: probe.duration
+            video: plan.video, audio: plan.audio, audioConverted: converted, initSegment: muxer.initSegment, fileBytes: fileBytes, duration: probe.duration
         ) else {
             muxer.close()
             throw Failure(message: "This file's codecs can't be described to the player.")
@@ -97,7 +102,7 @@ final class RemuxSession: @unchecked Sendable {
         }
         var audio: ProbedStream?
         if !probe.audio.isEmpty {
-            audio = probe.audio.first { $0.id == audioStreamID && RemuxSupport.canCopyAudio(codec: $0.codec) }
+            audio = probe.audio.first { $0.id == audioStreamID && RemuxSupport.canPlayAudio(codec: $0.codec) }
                 ?? RemuxSupport.chooseAudio(from: probe.streams, preferredLanguage: preferredAudioLanguage)
             guard audio != nil else {
                 let names = Set(probe.audio.map { $0.codec.uppercased() }).sorted().joined(separator: ", ")
@@ -161,7 +166,7 @@ final class RemuxSession: @unchecked Sendable {
         var info = MediaInfo(container: "MKV", engineName: "AVFoundation (remuxed)")
         info.hdr = video.hdr
         info.videoCodec = displayName(forCodec: video.codec)
-        info.audioCodec = audio.map { displayName(forCodec: $0.codec) }
+        info.audioCodec = audio.map { RemuxSupport.canCopyAudio(codec: $0.codec) ? displayName(forCodec: $0.codec) : "\(displayName(forCodec: $0.codec)) → AAC" }
         info.resolution = CGSize(width: video.width, height: video.height)
         info.displaySize = info.resolution
         info.frameRate = video.frameRate
@@ -184,6 +189,9 @@ final class RemuxSession: @unchecked Sendable {
     }
 
     static func displayName(forCodec codec: String) -> String {
-        ["h264": "H.264", "hevc": "HEVC", "eac3": "E-AC-3", "ac3": "AC-3", "aac": "AAC", "alac": "ALAC", "flac": "FLAC"][codec] ?? codec.uppercased()
+        [
+            "h264": "H.264", "hevc": "HEVC", "eac3": "E-AC-3", "ac3": "AC-3", "aac": "AAC", "alac": "ALAC", "flac": "FLAC",
+            "dts": "DTS", "truehd": "TrueHD", "mlp": "MLP", "opus": "Opus", "vorbis": "Vorbis", "mp3": "MP3", "mp2": "MP2",
+        ][codec] ?? (codec.hasPrefix("pcm_") ? "PCM" : codec.uppercased())
     }
 }
