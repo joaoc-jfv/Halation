@@ -10,12 +10,13 @@ struct PlayerServices {
     var recents: RecentFiles
     var sleep: any SleepPrevention
     var thumbnails: ThumbnailCache
+    var screenshots: ScreenshotStore
 
     static func live() -> PlayerServices {
         PlayerServices(
             preferences: Preferences(), folderAccess: FolderAccess(), nowPlaying: SystemNowPlaying(),
             resume: ResumeStore(), recents: RecentFiles(), sleep: SystemSleepPrevention(),
-            thumbnails: ThumbnailCache()
+            thumbnails: ThumbnailCache(), screenshots: ScreenshotStore()
         )
     }
 }

@@ -46,6 +46,8 @@ final class PlayerModel {
     private(set) var supportsVideoAdjustments = false
     private(set) var cropsBlackBarsAutomatically: Bool
     private(set) var isDetectingBlackBars = false
+    /// The file the last screenshot was saved to.
+    private(set) var lastScreenshot: URL?
     /// The open file plays on libmpv (see `PlaybackEngine.isCompatibilityEngine`).
     private(set) var isCompatibilityEngine = false
     /// The engine draws subtitles itself (mpv), so the delay and the lift above the controls go to it.
@@ -978,5 +980,30 @@ extension PlayerModel {
             return
         }
         togglePanel(.adjustments)
+    }
+}
+
+// MARK: Screenshots
+
+extension PlayerModel {
+    /// Saves the frame on screen to Pictures ▸ Nit Picker, as HDR HEIC when the source is HDR and as PNG otherwise.
+    func takeScreenshot() {
+        registerActivity()
+        guard let engine, hasMedia else { return }
+        let title = displayTitle
+        let time = currentTime
+        Task {
+            guard let frame = await engine.captureFrame(), let output = ScreenshotEncoder.encode(frame) else {
+                showToast("Couldn't take a screenshot", symbol: "exclamationmark.triangle")
+                return
+            }
+            do {
+                let url = try services.screenshots.save(output, title: title, at: time)
+                lastScreenshot = url
+                showToast(output.isHDR ? "HDR screenshot saved to Pictures" : "Screenshot saved to Pictures", symbol: "camera")
+            } catch {
+                showToast("Couldn't save the screenshot", symbol: "exclamationmark.triangle")
+            }
+        }
     }
 }

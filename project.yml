@@ -64,6 +64,8 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.files.user-selected.read-only: true
         com.apple.security.files.bookmarks.app-scope: true
+        # Screenshots go to Pictures ▸ Nit Picker without a save panel.
+        com.apple.security.assets.pictures.read-write: true
         # Phase 2's loopback HLS server. Verified in the sandboxed test host: without `server` the listener is
         # denied, and without `client` AVPlayer can't reach it (playback never starts).
         com.apple.security.network.server: true

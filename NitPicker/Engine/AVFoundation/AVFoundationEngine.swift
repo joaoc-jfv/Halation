@@ -1,5 +1,6 @@
 import AVFoundation
 import AppKit
+import CoreImage
 
 @MainActor
 final class AVFoundationEngine: PlaybackEngine {
@@ -158,6 +159,28 @@ final class AVFoundationEngine: PlaybackEngine {
         generator.requestedTimeToleranceBefore = .positiveInfinity
         generator.requestedTimeToleranceAfter = .positiveInfinity
         return try? await generator.image(at: time.cmTime).image
+    }
+
+    /// The frame on screen, with its HDR colour. An output is attached only for the moment of the capture, so playback is never
+    /// routed through one.
+    func captureFrame() async -> CapturedFrame? {
+        guard let item else { return nil }
+        let output = AVPlayerItemVideoOutput(pixelBufferAttributes: nil)
+        item.add(output)
+        defer { item.remove(output) }
+        // A new output only gets frames that are drawn after it joined; showing the same moment again draws one.
+        _ = await player.seek(to: player.currentTime(), toleranceBefore: .zero, toleranceAfter: .zero)
+        for _ in 0..<40 {
+            let time = item.currentTime()
+            if output.hasNewPixelBuffer(forItemTime: time),
+               let buffer = output.copyPixelBuffer(forItemTime: time, itemTimeForDisplay: nil) {
+                if let transfer = CapturedFrame.hdrTransfer(of: buffer) { return .hdr(buffer, transfer: transfer) }
+                let image = CIImage(cvPixelBuffer: buffer)
+                return CIContext().createCGImage(image, from: image.extent).map { .sdr($0) }
+            }
+            try? await Task.sleep(for: .milliseconds(50))
+        }
+        return nil
     }
 
     var isHDRPlaybackEligible: Bool { AVPlayer.eligibleForHDRPlayback }

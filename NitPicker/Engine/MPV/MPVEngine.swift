@@ -358,6 +358,20 @@ final class MPVEngine: PlaybackEngine {
         didSet { mpv?.set("audio-channels", string: audioOutputMode == .stereo ? "stereo" : "auto-safe") }
     }
 
+    /// The frame on screen as mpv shows it (tone-mapped for HDR, so an ordinary picture).
+    func captureFrame() async -> CapturedFrame? {
+        guard let handle = mpv, isLoaded else { return nil }
+        // Off the main actor: copying a 4K frame out takes a moment, and mpv's own threads may want the main thread meanwhile.
+        let frame = await Task.detached(priority: .userInitiated) { handle.screenshotRaw("video") }.value
+        guard let frame, let provider = CGDataProvider(data: Data(frame.bytes) as CFData) else { return nil }
+        let info = CGBitmapInfo.byteOrder32Little.union(CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipFirst.rawValue))
+        return CGImage(
+            width: frame.width, height: frame.height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: frame.stride,
+            space: CGColorSpace(name: CGColorSpace.sRGB) ?? CGColorSpaceCreateDeviceRGB(), bitmapInfo: info, provider: provider,
+            decode: nil, shouldInterpolate: false, intent: .defaultIntent
+        ).map { .sdr($0) }
+    }
+
     /// mpv can only capture the frame on screen, so stills come from a second decode path (see `MPVThumbnailer`).
     func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage? {
         await thumbnailer?.thumbnail(at: time, maxSize: maxSize)

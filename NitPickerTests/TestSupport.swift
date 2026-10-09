@@ -20,11 +20,14 @@ extension PlayerServices {
         recents: RecentFiles = RecentFiles(defaults: throwawayDefaults()),
         thumbnails: ThumbnailCache = ThumbnailCache(
             directory: FileManager.default.temporaryDirectory.appendingPathComponent("nitpicker-posters-\(UUID().uuidString)")
+        ),
+        screenshots: ScreenshotStore = ScreenshotStore(
+            directory: FileManager.default.temporaryDirectory.appendingPathComponent("nitpicker-shots-\(UUID().uuidString)")
         )
     ) -> PlayerServices {
         PlayerServices(
             preferences: preferences, folderAccess: FolderAccess(defaults: throwawayDefaults()),
-            nowPlaying: nowPlaying, resume: resume, recents: recents, sleep: sleep, thumbnails: thumbnails
+            nowPlaying: nowPlaying, resume: resume, recents: recents, sleep: sleep, thumbnails: thumbnails, screenshots: screenshots
         )
     }
 }
@@ -66,6 +69,8 @@ final class FakeEngine: PlaybackEngine {
     var drawsSubtitlesNatively = false
     var isCompatibilityEngine = false
     var supportsVideoAdjustments = false
+    var capturedFrame: CapturedFrame?
+    func captureFrame() async -> CapturedFrame? { capturedFrame }
     private(set) var adjustments: [VideoAdjustments] = []
     private(set) var loadedStarts: [Duration?] = []
     private(set) var subtitleDelays: [Duration] = []

@@ -207,6 +207,8 @@ final class RemuxEngine: PlaybackEngine {
     var stretchesVideoToFrame: Bool { get { inner.stretchesVideoToFrame } set { inner.stretchesVideoToFrame = newValue } }
     var capabilities: EngineCapabilities { inner.capabilities }
 
+    func captureFrame() async -> CapturedFrame? { await inner.captureFrame() }
+
     var isHDRPlaybackEligible: Bool { inner.isHDRPlaybackEligible }
     var isPictureInPictureAvailable: Bool { inner.isPictureInPictureAvailable }
     func togglePictureInPicture() { inner.togglePictureInPicture() }

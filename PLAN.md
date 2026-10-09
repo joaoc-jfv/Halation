@@ -434,7 +434,7 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 | 4.1 | **Folder playlists**, next/previous episode detection (`S01E02`), "Up next" | **Done** (see 4.1 notes) |
 | 4.2 | Auto black-bar crop detection | **Done** (see 4.2 notes) |
 | 4.3 | Video adjustments (brightness, contrast, saturation) on the mpv engine | **Done** (see 4.3 notes) |
-| 4.4 | Screenshots (⌘⇧S), HDR HEIC when the source is HDR | Not started |
+| 4.4 | Screenshots (⌘⇧S), HDR HEIC when the source is HDR | **Done** (see 4.4 notes) |
 | 4.5 | Packaging: notarized DMG script. Sparkle, the website and subtitle downloads need accounts and keys that only the owner can create, so they are listed as owner tasks | Not started |
 
 4.1 notes (done; the card and the hand-over checked in the real app with two generated episodes in the app's own container, where the sandbox allows listing a folder):
@@ -449,6 +449,11 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 4.3 notes (done):
 - `VideoAdjustments` (-100...100, mpv's scale) are the engine's `supportsVideoAdjustments` / `setVideoAdjustments`; only `MPVEngine` says yes, because the AVFoundation path would need a video composition or Core Image, which breaks HDR and Dolby Vision (CLAUDE.md). The control bar shows a Picture button and a panel (three sliders, Reset) only when the open file plays on mpv; Video ▸ Picture Adjustments… opens the panel or, on another engine, says it needs the Compatibility Engine (which Video ▸ Compatibility Engine switches to at the same position). Values belong to the open file: they reset when another file opens, and carry over when the engine is switched.
 - **Verified in the real app** by setting the sliders through the accessibility API and capturing the window: saturation −100 gives a grey picture, brightness 70 a much brighter one, and the paused frame updates at once. A unit test can't see it, because `screenshot-raw` in this build doesn't include the equaliser (its pixels didn't change with any of brightness, contrast, saturation or gamma); the tests check mpv's own state (values accepted, kept, clamped, applied before loading).
+4.4 notes (done; checked in the real app on the 4K Dolby Vision file):
+- File ▸ Save Screenshot (⌘⇧S) asks the engine for the frame on screen (`PlaybackEngine.captureFrame` → `CapturedFrame`) and saves it to **Pictures ▸ Nit Picker** as `<title> <time>.<ext>` without a save panel (new entitlement `com.apple.security.assets.pictures.read-write`; the real Pictures folder comes from the passwd entry, because `FileManager` answers with the container's copy). A name that is taken gets a number. File ▸ Show Last Screenshot in Finder reveals it.
+- **AVFoundation** (and the remux engine through it): an `AVPlayerItemVideoOutput` is attached only for the moment of the capture (a player that is paused needs the same moment shown again, by a zero-tolerance seek, before a new output gets a frame). A buffer tagged PQ or HLG stays a pixel buffer and is written as **10-bit HEIC** in the matching BT.2100 colour space with Core Image (`heif10Representation`); anything else becomes a PNG. Core Image is used for stills only, never in the playback path. On the real 4K Dolby Vision 8.1 file the HEIC came out 3840×1920, 10 bits, profile "Rec. ITU-R BT.2100 PQ".
+- **mpv**: `screenshot-raw` (this FFmpeg has no image encoders) gives the frame as mpv shows it, tone-mapped for HDR, saved as PNG. Taken off the main actor.
+- Not verified: how the HEIC looks in Photos on an HDR display (a person must look); HLG files (the transfer is read from the buffer's tags, only PQ was exercised); Dolby Vision profile 5, whose buffers may not be plain PQ.
 - Remaining Phase 4 ideas, as written originally: subtitle downloads (OpenSubtitles API; needs an API key and consent screens), Sparkle updates, notarized DMG, website.
 
 ## 8. Testing strategy

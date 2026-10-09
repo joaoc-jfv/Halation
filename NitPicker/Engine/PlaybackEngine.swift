@@ -55,6 +55,9 @@ protocol PlaybackEngine: AnyObject {
     var supportsVideoAdjustments: Bool { get }
     func setVideoAdjustments(_ adjustments: VideoAdjustments)
 
+    /// The frame on screen right now, as the engine decodes it (HDR frames keep their HDR colour). Nil if it can't give one.
+    func captureFrame() async -> CapturedFrame?
+
     /// A still from around `time`, no larger than `maxSize`, for artwork and scrub previews. Nil if none could be made.
     func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage?
 
@@ -84,6 +87,7 @@ extension PlaybackEngine {
     var drawsSubtitlesNatively: Bool { false }
     var isCompatibilityEngine: Bool { false }
     var supportsVideoAdjustments: Bool { false }
+    func captureFrame() async -> CapturedFrame? { nil }
     func setVideoAdjustments(_ adjustments: VideoAdjustments) {}
     func setSubtitleDelay(_ delay: Duration) {}
     func setSubtitleStyle(_ style: SubtitleStyle) {}

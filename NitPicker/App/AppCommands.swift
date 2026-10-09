@@ -27,6 +27,16 @@ struct AppCommands: Commands {
             }
         }
 
+        CommandGroup(after: .saveItem) {
+            Button("Save Screenshot") { player.takeScreenshot() }
+                .keyboardShortcut("s", modifiers: [.command, .shift])
+                .disabled(!player.hasMedia)
+            Button("Show Last Screenshot in Finder") {
+                if let url = player.lastScreenshot { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            }
+            .disabled(player.lastScreenshot == nil)
+        }
+
         CommandGroup(after: .toolbar) {
             Button("Toggle Full Screen") { NSApp.keyWindow?.toggleFullScreen(nil) }
                 .keyboardShortcut("f", modifiers: [])
