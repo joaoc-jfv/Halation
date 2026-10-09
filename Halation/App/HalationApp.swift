@@ -2,26 +2,23 @@ import SwiftUI
 
 @main
 struct HalationApp: App {
+    @State private var player = PlayerModel()
+
     var body: some Scene {
         Window("Halation", id: "main") {
-            ContentView()
+            PlayerWindowView()
+                .environment(player)
+                .onOpenURL { player.open($0) }
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 960, height: 540)
-    }
-}
-
-private struct ContentView: View {
-    var body: some View {
-        ZStack {
-            Color.black
-            Text("Drop a video to play")
-                .font(.title3)
-                .foregroundStyle(.secondary)
-                .padding(.horizontal, 28)
-                .padding(.vertical, 18)
-                .glassEffect(.regular, in: .capsule)
+        .commands {
+            CommandGroup(replacing: .newItem) {
+                Button("Open…") {
+                    OpenPanel.chooseVideo { player.open($0) }
+                }
+                .keyboardShortcut("o")
+            }
         }
-        .ignoresSafeArea()
     }
 }

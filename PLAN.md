@@ -3,7 +3,7 @@
 > **Halation** (n.): the soft glow that forms around bright highlights on film.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestone 1.1 (project skeleton) is done; see §7 for the order of the rest.
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton) and 1.2 (engine core) are done; see §7 for the order of the rest.
 
 ---
 
@@ -88,6 +88,8 @@ protocol PlaybackEngine: AnyObject {
 
     var audioTracks: [MediaTrack] { get }
     var subtitleTracks: [MediaTrack] { get }         // embedded tracks only
+    var selectedAudioTrack: MediaTrack? { get }
+    var selectedSubtitleTrack: MediaTrack? { get }
     func selectAudio(_ track: MediaTrack?)
     func selectSubtitle(_ track: MediaTrack?)        // nil = off
 
@@ -97,7 +99,7 @@ protocol PlaybackEngine: AnyObject {
 }
 ```
 
-Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/failed), `PlaybackEvent`, `MediaTrack` (id, kind, language, title, codec, channels, isDefault, isForced, `isSpatial`), `MediaInfo` (container, codecs, resolution, frame rate, HDR format, audio format, bitrate, chapters), `HDRFormat` (.sdr/.hdr10/.hdr10Plus/.hlg/.dolbyVision(profile)), `AudioOutputMode`, `CropMode`.
+Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/failed), `PlaybackError`, `PlaybackEvent` (state, time, duration, buffering, media info, tracks changed), `MediaTrack` (id, kind, language, title, codec, channels, isDefault, isForced, `isSpatial`), `MediaInfo` (container, engine name, codecs, resolution, frame rate, bitrate; HDR format, audio layout and chapters join it in 1.3, 1.5 and 1.8), `AudioOutputMode`, `EngineCapabilities`. `HDRFormat` arrives with HDR detection and `CropMode` with the crop panel (1.7). An engine instance serves one file; `PlayerModel` creates a new one for each open and applies its stored rate, volume, mute and output mode.
 
 `PlayerModel` translates engine events into simple observable properties (`isPlaying`, `currentTime`, `duration`, `buffered`, `mediaInfo`, track lists, selected tracks) and holds UI-only state (controls visible, active panel, crop mode, external subtitle track).
 
@@ -138,13 +140,14 @@ Halation/
 │   ├── App/            HalationApp.swift, AppDelegate.swift, AppCommands.swift
 │   ├── Engine/
 │   │   ├── PlaybackEngine.swift, PlaybackTypes.swift, EngineRouter.swift
-│   │   ├── AVFoundation/   AVFoundationEngine.swift, AVTrackMapping.swift
+│   │   ├── AVFoundation/   AVFoundationEngine.swift, AVTrackMapping.swift, PlayerLayerView.swift
 │   │   ├── Remux/          (phase 2)
 │   │   └── MPV/            (phase 3)
-│   ├── Media/          MediaProbe.swift, MediaInfo.swift, HDRDetection.swift, AudioFormatDetection.swift
+│   ├── Media/          CodecNames.swift, MediaProbe.swift, HDRDetection.swift, AudioFormatDetection.swift
+│   ├── Player/         PlayerModel.swift, TimeFormatting.swift
 │   ├── Subtitles/      SubtitleCue.swift, SRTParser.swift, WebVTTParser.swift, SubtitleTrackStore.swift
 │   ├── UI/
-│   │   ├── Player/     PlayerWindowView.swift, VideoSurfaceView.swift, SubtitleOverlay.swift
+│   │   ├── Player/     PlayerWindowView.swift, VideoSurfaceView.swift, OpenPanel.swift, SubtitleOverlay.swift
 │   │   ├── Controls/   ControlBar.swift, Scrubber.swift, TrackPanel.swift, SpeedPanel.swift, CropPanel.swift, VolumeControl.swift
 │   │   ├── HUD/        InfoHUD.swift, FormatBadges.swift, OSDToast.swift
 │   │   └── Welcome/    WelcomeView.swift (drop zone + recents)
