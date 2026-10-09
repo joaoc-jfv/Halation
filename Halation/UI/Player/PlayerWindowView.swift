@@ -2,12 +2,14 @@ import SwiftUI
 
 struct PlayerWindowView: View {
     @Environment(PlayerModel.self) private var player
+    @State private var windowController = WindowController()
+    @FocusState private var isFocused: Bool
 
     var body: some View {
         ZStack {
             Color.black
             if let videoView = player.videoView {
-                VideoSurfaceView(videoView: videoView)
+                VideoSurfaceView(videoView: videoView) { windowController.toggleFullScreen() }
             }
             if !player.hasMedia || player.errorMessage != nil {
                 EmptyStateView()
@@ -20,6 +22,19 @@ struct PlayerWindowView: View {
             }
         }
         .ignoresSafeArea()
+        .background(WindowAccessor { windowController.configure($0) })
+        .onChange(of: player.mediaInfo?.resolution) { _, size in
+            if let size { windowController.fit(toVideoSize: size) }
+        }
+        // TEMPORARY: milestone 1.4 moves all shortcuts into the menus.
+        .focusable()
+        .focusEffectDisabled()
+        .focused($isFocused)
+        .onAppear { isFocused = true }
+        .onKeyPress("f") {
+            windowController.toggleFullScreen()
+            return .handled
+        }
         .dropDestination(for: URL.self) { urls, _ in
             guard let url = urls.first else { return false }
             player.open(url)

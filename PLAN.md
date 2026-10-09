@@ -3,7 +3,7 @@
 > **Halation** (n.): the soft glow that forms around bright highlights on film.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton) and 1.2 (engine core) are done; see §7 for the order of the rest.
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core) and 1.3 (video surface and window) are done; see §7 for the order of the rest.
 
 ---
 
@@ -99,7 +99,7 @@ protocol PlaybackEngine: AnyObject {
 }
 ```
 
-Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/failed), `PlaybackError`, `PlaybackEvent` (state, time, duration, buffering, media info, tracks changed), `MediaTrack` (id, kind, language, title, codec, channels, isDefault, isForced, `isSpatial`), `MediaInfo` (container, engine name, codecs, resolution, frame rate, bitrate; HDR format, audio layout and chapters join it in 1.3, 1.5 and 1.8), `AudioOutputMode`, `EngineCapabilities`. `HDRFormat` arrives with HDR detection and `CropMode` with the crop panel (1.7). An engine instance serves one file; `PlayerModel` creates a new one for each open and applies its stored rate, volume, mute and output mode.
+Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/failed), `PlaybackError`, `PlaybackEvent` (state, time, duration, buffering, media info, tracks changed), `MediaTrack` (id, kind, language, title, codec, channels, isDefault, isForced, `isSpatial`), `MediaInfo` (container, engine name, HDR format, codecs, resolution, frame rate, bitrate; audio layout and chapters join it in 1.5 and 1.8), `AudioOutputMode`, `EngineCapabilities`. `HDRFormat` (.sdr/.hdr10/.hdr10Plus/.hlg/.dolbyVision(profile, compatibilityID)) lives in `PlaybackTypes.swift`, and `CropMode` with the crop panel (1.7). An engine instance serves one file; `PlayerModel` creates a new one for each open and applies its stored rate, volume, mute and output mode.
 
 `PlayerModel` translates engine events into simple observable properties (`isPlaying`, `currentTime`, `duration`, `buffered`, `mediaInfo`, track lists, selected tracks) and holds UI-only state (controls visible, active panel, crop mode, external subtitle track).
 
@@ -147,7 +147,7 @@ Halation/
 │   ├── Player/         PlayerModel.swift, TimeFormatting.swift
 │   ├── Subtitles/      SubtitleCue.swift, SRTParser.swift, WebVTTParser.swift, SubtitleTrackStore.swift
 │   ├── UI/
-│   │   ├── Player/     PlayerWindowView.swift, VideoSurfaceView.swift, OpenPanel.swift, SubtitleOverlay.swift
+│   │   ├── Player/     PlayerWindowView.swift, VideoSurfaceView.swift, WindowController.swift, WindowSizing.swift, OpenPanel.swift, SubtitleOverlay.swift
 │   │   ├── Controls/   ControlBar.swift, Scrubber.swift, TrackPanel.swift, SpeedPanel.swift, CropPanel.swift, VolumeControl.swift
 │   │   ├── HUD/        InfoHUD.swift, FormatBadges.swift, OSDToast.swift
 │   │   └── Welcome/    WelcomeView.swift (drop zone + recents)
@@ -163,6 +163,7 @@ Halation/
 ### 5.1 HDR and Dolby Vision
 - Render with `AVPlayerLayer` hosted in a layer-backed `NSView`. On Apple Silicon with an EDR-capable display, AVFoundation outputs HDR as EDR automatically. **Do not** put an `AVVideoComposition` or Core Image filter in the path for normal playback, because that can strip HDR/DV metadata and costs performance.
 - Detection (`HDRDetection`): use `AVAssetTrack` media characteristics (`.containsHDRVideo`), the format description's transfer function (`kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ` → HDR10, `_ITU_R_2100_HLG` → HLG), and the Dolby Vision codec types (`dvh1`/`dvhe`, or HEVC with a `dvcC`/`dvvC` extension) → DV profile.
+- Implementation notes (1.3): `AVPlayerLayer` switches to EDR by itself when HDR plays, so the layer needs no `wantsExtendedDynamicRangeContent` flag. `HDRDetection` works from the track's format description. Dolby Vision profile and compatibility ID come from the `dvcC`/`dvvC` record, so 8.1 reads as profile 8, ID 1 and 8.4 as profile 8, ID 4. HDR10+ can't be told apart from HDR10 there (its metadata is in the bitstream), so `.hdr10Plus` is never produced yet.
 - Show `AVPlayer.eligibleForHDRPlayback` in the info panel so users know if their display or setup can show HDR.
 - Keep `AVPlayerItem.appliesPerFrameHDRDisplayMetadata = true` (the default) for DV and HDR10+.
 - Badge in the HUD: `HDR10`, `HDR10+`, `HLG`, `Dolby Vision` (see open question about DV naming), or nothing for SDR.
@@ -241,7 +242,7 @@ All shortcuts also appear in the menu bar (Playback, Audio, Subtitles, Video men
 
 **Principle:** the video is the content and glass is the chrome. Controls float over the video and disappear when not needed.
 
-- **Window:** `.windowStyle(.hiddenTitleBar)`, full-size content view, the video fills the window edge to edge. Traffic lights float over the video and fade with the controls. The window resizes to the video's aspect ratio when a file opens (capped to 80% of the screen). Black window background.
+- **Window:** `.windowStyle(.hiddenTitleBar)`, full-size content view, the video fills the window edge to edge. Traffic lights float over the video and fade with the controls. The window resizes to the video's aspect ratio when a file opens: native size, at least 640 pt wide, capped to 80% of the screen (`WindowSizing`). It is not aspect-locked afterwards. Black window background.
 - **Control bar:** a floating capsule, bottom-center, inset 20 pt from the bottom, max width ~720 pt. Uses `.glassEffect(.regular.interactive(), in: .capsule)` inside a `GlassEffectContainer` so panels can **morph out of the bar** (with `glassEffectID` and a `@Namespace`).
   - Left: play/pause, −10 s, +10 s.
   - Center: elapsed time · scrubber (buffered range, chapter ticks, hover thumbnail) · remaining time (click to toggle total).

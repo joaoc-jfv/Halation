@@ -300,6 +300,7 @@ final class AVFoundationEngine: PlaybackEngine {
             info.resolution = CGSize(width: abs(oriented.width), height: abs(oriented.height))
             info.frameRate = frameRate > 0 ? Double(frameRate) : nil
             info.videoCodec = formats.first.map { CodecNames.displayName(forFourCC: $0.mediaSubType.rawValue) }
+            info.hdr = formats.first.map(HDRDetection.format(of:)) ?? .sdr
             bitrate += Double(dataRate)
         }
         if let audio = try await asset.loadTracks(withMediaType: .audio).first {

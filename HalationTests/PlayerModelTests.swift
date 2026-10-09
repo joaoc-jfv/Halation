@@ -54,6 +54,27 @@ import Testing
         await wait("restart") { player.state == .playing }
     }
 
+    @Test func reportsSDRForAnSDRFile() async throws {
+        let url = try await TestVideo.make(seconds: 1)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let player = PlayerModel()
+        defer { player.close() }
+        player.open(url)
+        await wait("media info") { player.mediaInfo != nil }
+        #expect(player.mediaInfo?.hdr == .sdr)
+    }
+
+    @Test func detectsAndPlaysHDR10() async throws {
+        let url = try await TestVideo.make(seconds: 1, flavor: .hdr10HEVC)
+        defer { try? FileManager.default.removeItem(at: url) }
+        let player = PlayerModel()
+        defer { player.close() }
+        player.open(url)
+        await wait("playback to start") { player.state == .playing }
+        #expect(player.mediaInfo?.hdr == .hdr10)
+        #expect(player.mediaInfo?.videoCodec == "HEVC")
+    }
+
     @Test func rateVolumeAndMuteSurviveAcrossFiles() async throws {
         let url = try await TestVideo.make(seconds: 1)
         defer { try? FileManager.default.removeItem(at: url) }

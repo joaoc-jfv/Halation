@@ -62,9 +62,22 @@ struct MediaTrack: Identifiable, Hashable, Sendable {
     var isSpatial: Bool
 }
 
+enum HDRFormat: Equatable, Sendable {
+    case sdr
+    case hdr10
+    /// Not detected yet: HDR10+ is signalled in the bitstream, not the format description.
+    case hdr10Plus
+    case hlg
+    /// `nil` when the configuration record is missing or unreadable.
+    case dolbyVision(profile: Int?, compatibilityID: Int?)
+
+    var isHDR: Bool { self != .sdr }
+}
+
 struct MediaInfo: Equatable, Sendable {
     var container: String
     var engineName: String
+    var hdr: HDRFormat = .sdr
     var videoCodec: String?
     var audioCodec: String?
     var resolution: CGSize?

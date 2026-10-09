@@ -1,17 +1,34 @@
 import AVFoundation
 import CoreVideo
+import VideoToolbox
 import Foundation
 
 /// Writes a tiny H.264 clip so playback tests don't need media files in the repo.
 enum TestVideo {
-    static func make(seconds: Int = 2, fps: Int = 10, size: CGSize = CGSize(width: 320, height: 240)) async throws -> URL {
+    enum Flavor { case sdrH264, hdr10HEVC }
+
+    static func make(
+        seconds: Int = 2, fps: Int = 10, size: CGSize = CGSize(width: 320, height: 240), flavor: Flavor = .sdrH264
+    ) async throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("halation-\(UUID().uuidString).mp4")
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: [
+        var settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: Int(size.width),
             AVVideoHeightKey: Int(size.height),
-        ])
+        ]
+        if flavor == .hdr10HEVC {
+            settings[AVVideoCodecKey] = AVVideoCodecType.hevc
+            settings[AVVideoColorPropertiesKey] = [
+                AVVideoColorPrimariesKey: AVVideoColorPrimaries_ITU_R_2020,
+                AVVideoTransferFunctionKey: AVVideoTransferFunction_SMPTE_ST_2084_PQ,
+                AVVideoYCbCrMatrixKey: AVVideoYCbCrMatrix_ITU_R_2020,
+            ]
+            settings[AVVideoCompressionPropertiesKey] = [
+                AVVideoProfileLevelKey: kVTProfileLevel_HEVC_Main10_AutoLevel as String,
+            ]
+        }
+        let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(
             assetWriterInput: input,
             sourcePixelBufferAttributes: [
