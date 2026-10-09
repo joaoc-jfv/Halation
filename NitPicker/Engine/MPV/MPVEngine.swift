@@ -48,8 +48,11 @@ final class MPVEngine: PlaybackEngine {
     /// mpv's track id for each sidecar file already added, so adding one twice reuses the track.
     private var addedSubtitleIDs: [String: Int] = [:]
 
+    private var resizeTask: Task<Void, Never>?
+
     init() {
         (events, continuation) = AsyncStream.makeStream(of: PlaybackEvent.self)
+        view.onDrawableSizeChange = { [weak self] _ in self?.drawableSizeChanged() }
     }
 
     let capabilities = EngineCapabilities(supportsPictureInPicture: false, supportsDolbyVision: false, supportsSpatialAudio: false)
@@ -137,6 +140,7 @@ final class MPVEngine: PlaybackEngine {
     }
 
     func close() {
+        resizeTask?.cancel()
         resumeLoad(with: CancellationError())
         consuming?.cancel()
         consuming = nil
@@ -149,6 +153,32 @@ final class MPVEngine: PlaybackEngine {
         if let handle { Task.detached(priority: .utility) { handle.destroy() } }
         setState(.idle)
         continuation.finish()
+    }
+
+    // MARK: Following the window
+
+    /// mpv reads its output size once, when the video output starts: later changes to the layer's size make its swapchain bigger
+    /// but leave the picture laid out for the old size (found in the real app, where the window is resized to the video after
+    /// the file opens). Restarting the output makes it measure again. That is heavy, so it waits for the size to settle, and the
+    /// layer keeps showing the last frame, scaled by Core Animation, until the new one is drawn.
+    private func drawableSizeChanged() {
+        guard isLoaded else { return }
+        resizeTask?.cancel()
+        resizeTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(300))
+            guard !Task.isCancelled else { return }
+            self?.remeasureOutput()
+        }
+    }
+
+    private func remeasureOutput() {
+        guard let mpv, isLoaded, let width = mpv.int("osd-dimensions/w"), let height = mpv.int("osd-dimensions/h") else { return }
+        let size = view.metalLayer.drawableSize
+        guard width > 0, abs(Double(width) - size.width) > 2 || abs(Double(height) - size.height) > 2 else { return }
+        Self.log.debug("restarting the video output: \(width)x\(height) -> \(Int(size.width))x\(Int(size.height))")
+        guard let track = mpv.int("vid") else { return }
+        mpv.set("vid", string: "no")
+        mpv.set("vid", string: "\(track)")
     }
 
     // MARK: Events

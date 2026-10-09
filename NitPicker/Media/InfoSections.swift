@@ -16,7 +16,7 @@ struct InfoSection: Equatable, Identifiable {
 enum InfoSections {
     static func build(
         fileName: String, info: MediaInfo, audio: MediaTrack?, outputMode: AudioOutputMode,
-        isHDRPlaybackEligible: Bool, rate: Float
+        isHDRPlaybackEligible: Bool, rate: Float, spatialAudioAvailable: Bool = true
     ) -> [InfoSection] {
         var sections: [InfoSection] = []
 
@@ -53,12 +53,14 @@ enum InfoSections {
             audioRows.append(InfoRow(label: "Track", value: audio.displayName))
             if let codec = audio.codec ?? info.audioCodec { audioRows.append(InfoRow(label: "Codec", value: codec)) }
             if let layout = audio.channelLabel { audioRows.append(InfoRow(label: "Layout", value: layout)) }
-            audioRows.append(InfoRow(label: "Spatial Audio track", value: audio.isSpatial ? "Yes" : "No"))
+            // The compatibility engine has no system spatialization, so the question has no answer there.
+            if spatialAudioAvailable { audioRows.append(InfoRow(label: "Spatial Audio track", value: audio.isSpatial ? "Yes" : "No")) }
         } else if let codec = info.audioCodec {
             audioRows.append(InfoRow(label: "Codec", value: codec))
         }
         if !audioRows.isEmpty {
-            audioRows.append(InfoRow(label: "Output", value: outputMode == .spatial ? "Spatial Audio" : "Stereo"))
+            let surround = spatialAudioAvailable ? "Spatial Audio" : "Original channels"
+            audioRows.append(InfoRow(label: "Output", value: outputMode == .spatial ? surround : "Stereo"))
             sections.append(InfoSection(title: "Audio", rows: audioRows))
         }
 

@@ -66,7 +66,8 @@ final class PlayerModel {
         guard let info = mediaInfo else { return [] }
         return InfoSections.build(
             fileName: currentURL?.lastPathComponent ?? displayTitle, info: info, audio: selectedAudio,
-            outputMode: audioOutputMode, isHDRPlaybackEligible: isHDRPlaybackEligible, rate: rate
+            outputMode: audioOutputMode, isHDRPlaybackEligible: isHDRPlaybackEligible, rate: rate,
+            spatialAudioAvailable: !isCompatibilityEngine
         )
     }
 
@@ -735,7 +736,15 @@ final class PlayerModel {
         engine?.setSubtitleStyle(style)
     }
 
-    /// The overlay reports how far above the bottom the subtitles should sit; an engine that draws them moves them to match.
+    /// How far above the bottom of the visible picture subtitles sit, as a fraction of its height: the app's own position, lifted
+    /// clear of the control bar while it shows. The same number places an engine's own subtitles (`setSubtitleLift`).
+    func nativeSubtitleLift(container: CGSize) -> Double {
+        let rect = VideoGeometry.placement(container: container, videoSize: mediaInfo?.presentationSize, layout: videoLayout).clipRect
+        guard rect.height > 0 else { return 0.06 + subtitles.style.verticalOffset }
+        let bottom = SubtitleLayout.bottomInset(videoRect: rect, container: container, style: subtitles.style, controlsVisible: controlsVisible)
+        return Double(bottom / rect.height)
+    }
+
     func setSubtitleLift(_ fraction: Double) {
         engine?.setSubtitleLift(fraction)
     }

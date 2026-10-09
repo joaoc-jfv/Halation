@@ -287,7 +287,7 @@ import Testing
 @Suite struct MPVDolbyVisionNoteTests {
     @Test func theNoteExplainsAToneMappedDolbyVisionSource() {
         let note = MPVMapping.hdrNote(source: .dolbyVision(profile: 8, compatibilityID: 1), shown: .hdr10)
-        #expect(note?.hasPrefix("Dolby Vision 8.1 source, shown as HDR10 (tone-mapped)") == true)
+        #expect(note?.hasPrefix("Dolby Vision 8.1 source, tone-mapped to HDR10") == true)
         #expect(MPVMapping.hdrNote(source: .hdr10, shown: .hdr10) == nil)
         #expect(MPVMapping.hdrNote(source: nil, shown: .sdr) == nil)
         let rows = InfoSections.build(
@@ -295,6 +295,17 @@ import Testing
             audio: nil, outputMode: .spatial, isHDRPlaybackEligible: true, rate: 1
         ).first { $0.title == "HDR" }?.rows
         #expect(rows?.contains { $0.label == "Note" } == true)
+
+        // No system spatialization on this engine: the panel doesn't claim any.
+        let track = MediaTrack(id: "audio-1", kind: .audio, language: "it", title: nil, codec: "E-AC-3", channels: 6, isDefault: true, isForced: false, isSpatial: false)
+        func audio(_ available: Bool) -> [InfoRow] {
+            InfoSections.build(
+                fileName: "a.mkv", info: MediaInfo(container: "MKV", engineName: "x"), audio: track, outputMode: .spatial,
+                isHDRPlaybackEligible: true, rate: 1, spatialAudioAvailable: available
+            ).first { $0.title == "Audio" }?.rows ?? []
+        }
+        #expect(audio(true).contains { $0.label == "Spatial Audio track" } && audio(true).first { $0.label == "Output" }?.value == "Spatial Audio")
+        #expect(!audio(false).contains { $0.label == "Spatial Audio track" } && audio(false).first { $0.label == "Output" }?.value == "Original channels")
     }
 
     @Test func readsTheDolbyVisionProfileFromTheFileAndShowsItInTheInfo() async throws {
@@ -442,5 +453,37 @@ extension MPVSubtitleTests {
         await waitUntil("the jump") { abs(model.livePlaybackTime().seconds - 3) < 0.3 }
         #expect(model.currentChapter?.title == "Middle")
         #expect(model.previousChapter()?.title == "Opening")
+    }
+}
+
+@MainActor
+@Suite struct MPVResizeTests {
+    @Test func theVideoOutputFollowsTheViewWhenItIsResizedAfterLoading() async throws {
+        let file = try LegacyFixture.makeMPEG4(seconds: 20)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let engine = MPVEngine()
+        let view = try #require(engine.videoView as? MPVVideoView)
+        view.frame = NSRect(x: 0, y: 0, width: 400, height: 300)
+        view.layout()
+        try await engine.load(file, startAt: nil)
+        defer { engine.close() }
+        engine.play()
+        let handle = try #require(engine.handleForTesting)
+        await waitUntil("the first frame") { (handle.int("osd-dimensions/w") ?? 0) > 0 }
+        let before = view.metalLayer.drawableSize
+        #expect(handle.int("osd-dimensions/w") == Int(before.width))
+
+        // The window grows to fit the video once its size is known; mpv must lay the picture out for the new size.
+        view.frame = NSRect(x: 0, y: 0, width: 900, height: 700)
+        view.layout()
+        let after = view.metalLayer.drawableSize
+        #expect(after != before)
+        await waitUntil("mpv to measure again", timeout: .seconds(8)) {
+            handle.int("osd-dimensions/w") == Int(after.width) && handle.int("osd-dimensions/h") == Int(after.height)
+        }
+        // Playback carries on from where it was.
+        let position = handle.double("time-pos") ?? 0
+        await waitUntil("time to move") { (handle.double("time-pos") ?? 0) > position + 0.3 }
+        #expect(engine.currentTime.seconds > position)
     }
 }

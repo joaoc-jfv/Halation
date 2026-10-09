@@ -6,6 +6,7 @@ struct PlayerWindowView: View {
     @State private var windowController = WindowController()
     @FocusState private var isFocused: Bool
     @State private var isDropTargeted = false
+    @State private var containerSize = CGSize.zero
 
     private var showsControls: Bool { player.hasMedia && player.errorMessage == nil }
 
@@ -20,7 +21,7 @@ struct PlayerWindowView: View {
                     layout: player.videoLayout
                 ) { windowController.toggleFullScreen() }
             }
-            if player.drawsSubtitles || player.enginePaintsSubtitles {
+            if player.drawsSubtitles {
                 SubtitleOverlay()
             }
             if !showsControls {
@@ -39,6 +40,10 @@ struct PlayerWindowView: View {
             toast
         }
         .ignoresSafeArea()
+        .onGeometryChange(for: CGSize.self, of: \.size) { containerSize = $0 }
+        // An engine that draws subtitles itself (mpv) lifts them clear of the controls. Not a view of its own: a SwiftUI layer
+        // over the mpv view hides the picture.
+        .onChange(of: player.nativeSubtitleLift(container: containerSize), initial: true) { _, lift in player.setSubtitleLift(lift) }
         .background(WindowAccessor { windowController.configure($0) })
         .onChange(of: player.displayTitle) { _, title in windowController.setTitle(player.hasMedia ? title : "Nit Picker") }
         .onChange(of: player.mediaInfo?.presentationSize) { _, size in

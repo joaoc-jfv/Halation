@@ -31,6 +31,8 @@ final class MPVMetalLayer: CAMetalLayer {
 /// View hosting the mpv layer. Keeps the layer's drawable at the view's size in pixels.
 final class MPVVideoView: NSView {
     let metalLayer = MPVMetalLayer()
+    /// Called on the main thread after the drawable's size in pixels changed.
+    var onDrawableSizeChange: ((CGSize) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -58,6 +60,9 @@ final class MPVVideoView: NSView {
         let scale = window?.backingScaleFactor ?? metalLayer.contentsScale
         metalLayer.contentsScale = scale
         metalLayer.frame = bounds
-        metalLayer.drawableSize = CGSize(width: bounds.width * scale, height: bounds.height * scale)
+        let size = CGSize(width: (bounds.width * scale).rounded(), height: (bounds.height * scale).rounded())
+        guard size != metalLayer.drawableSize else { return }
+        metalLayer.drawableSize = size
+        onDrawableSizeChange?(size)
     }
 }

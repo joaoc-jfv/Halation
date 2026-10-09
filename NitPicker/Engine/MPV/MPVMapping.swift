@@ -51,7 +51,7 @@ enum MPVMapping {
     /// What the info panel says when the file is Dolby Vision but mpv shows its HDR10 base layer (or a tone-mapped picture).
     static func hdrNote(source: HDRFormat?, shown: HDRFormat) -> String? {
         guard case .dolbyVision? = source else { return nil }
-        return "\(source!.detailName) source, shown as \(shown.badge ?? "SDR") (tone-mapped)."
+        return "\(source!.detailName) source, tone-mapped to \(shown.badge ?? "SDR")"
     }
 
     /// FFmpeg's name for a colour primaries mpv spells its own way, so `ColorDescription` can show it.

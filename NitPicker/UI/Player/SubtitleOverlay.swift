@@ -24,8 +24,6 @@ struct SubtitleOverlay: View {
             }
             .offset(x: rect.minX, y: rect.minY)
             .animation(reduceMotion ? nil : .easeInOut(duration: 0.25), value: bottom)
-            // An engine that draws the subtitles itself needs the same lift above the controls.
-            .onChange(of: bottom / max(rect.height, 1), initial: true) { _, lift in player.setSubtitleLift(lift) }
         }
         .allowsHitTesting(false)
     }
