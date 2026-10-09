@@ -124,7 +124,7 @@ Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/faile
 - **Dependencies:**
   - Phase 1: none (Apple frameworks only: AVFoundation, AVKit, CoreMedia, MediaPlayer, SwiftUI, AppKit).
   - Phase 2+: FFmpeg libraries (libavformat/libavcodec/libavutil) and later libmpv + libass. Preferred source: **MPVKit** (Swift package shipping libmpv, FFmpeg, and libass as xcframeworks). Pick its **LGPL** variant unless we decide to open-source under GPL. *Verify the current package name, maintenance status, and license variants before adding it.*
-- **Entitlements:** defined under `entitlements.properties` in `project.yml` (XcodeGen rewrites the `.entitlements` file from them, so editing the file by hand is lost; until 1.6 it had been regenerated empty and the app ran unsandboxed). App Sandbox; `com.apple.security.files.user-selected.read-only`; `com.apple.security.files.bookmarks.app-scope` (resume and recents across launches via security-scoped bookmarks). Hardened Runtime is enabled in build settings, but Xcode turns it off while signing ad hoc (`CODE_SIGN_IDENTITY: "-"`, used so the project builds without a team). Set a real signing identity for release builds. If phase 2 uses a localhost HTTP server, add `com.apple.security.network.server`. The plan prefers `AVAssetResourceLoader`, which avoids that.
+- **Entitlements:** defined under `entitlements.properties` in `project.yml` (XcodeGen rewrites the `.entitlements` file from them, so editing the file by hand is lost; until 1.6 it had been regenerated empty and the app ran unsandboxed). App Sandbox; `com.apple.security.files.user-selected.read-only`; `com.apple.security.files.bookmarks.app-scope` (resume and recents across launches via security-scoped bookmarks). Hardened Runtime is enabled in build settings, but Xcode turns it off while signing ad hoc (`CODE_SIGN_IDENTITY: "-"`, used so the project builds without a team). Set a real signing identity for release builds. Phase 2 needs a loopback HTTP server (the spike showed `AVAssetResourceLoader` cannot serve HLS media), so add `com.apple.security.network.server` and `com.apple.security.network.client`, and check in the sandbox that AVPlayer can reach the loopback listener.
 - **Distribution (later):** Developer ID + notarization, Sparkle for updates, GitHub Releases. App Store optional; the sandbox setup above keeps that open.
 
 ### Folder layout
@@ -289,13 +289,15 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 | 1.10 | **Polish pass**: accessibility, Reduce Transparency, error states, app icon | Ready for daily use with MP4/MOV |
 
 ### Phase 2 — MKV via remuxing
-- Add FFmpeg libraries (via MPVKit or a dedicated FFmpeg xcframework).
+- **Spike done** (`Spikes/MKVRemux/`, see its README): the approach below works on a real 4K Dolby Vision 8.1 + E-AC-3 JOC MKV, with two changes to the original plan. The transport is a **loopback HTTP server**, because `AVAssetResourceLoader` cannot feed HLS media (`-12881`). And every segment is cut by seeking and **using a fresh muxer, then rewriting `tfdt`**, with one init shared by all segments.
+- Add FFmpeg libraries. The spike used MPVKit `1.1.0-n9.0.2` (FFmpeg n9, LGPL, static). Its README says it is "only suitable for learning" and "will not be maintained too frequently" (it did ship a release on 2026-10-07). Options for the real build: depend on MPVKit's FFmpeg binary targets only (Libavformat, Libavcodec, Libavutil, pinned by checksum), or depend on AetherEngine, which already implements this whole architecture (LGPL-3.0 with an App Store exception) and could be used as a dependency or as a reference.
 - `MKVProbe`: read tracks, codecs, cues (keyframe index), chapters, and attachments with libavformat.
-- `RemuxEngine`: present the MKV to AVPlayer as an HLS VOD stream with fMP4 segments, served through `AVAssetResourceLoader` with a custom URL scheme (`halation-remux://`):
-  - Build the master and media playlists up front from the cues (segments of roughly 4–6 s, aligned to keyframes).
-  - Generate the init segment and each media segment on demand: seek the demuxer, copy packets (no re-encode) into fragmented MP4 with the right sample entries (`hvc1` for HEVC, `dvh1` plus `dvcC`/`dvvC` for Dolby Vision, `av01`, `ec-3` with `dec3` keeping the JOC info for spatial audio).
+- `RemuxEngine`: present the MKV to AVPlayer as an HLS VOD stream with fMP4 segments, served by a loopback HTTP server bound to 127.0.0.1 (`NWListener`):
+  - Build the master and media playlists up front from the cues (segments of roughly 4–6 s, aligned to keyframes). libavformat exposes the Cues after the first seek, so for a 55-minute 4K file that is 996 keyframes in ~0.3 s. The master playlist carries `CODECS` (`hvc1…`, `ec-3`), `SUPPLEMENTAL-CODECS` (`dvh1.08.06/db1p`) and `VIDEO-RANGE=PQ`, built from the `hvcC` and `dvvC` records.
+  - Generate the init segment and each media segment on demand: seek the demuxer, copy packets (no re-encode) into fragmented MP4 with FFmpeg's mp4 muxer. It writes the right sample entries itself: `hvc1` + `hvcC` + `dvvC` for Dolby Vision (needs `strict unofficial`), `ec-3` + a `dec3` that carries the JOC flag (it parses the first packets, so use `delay_moov`). Details and the `tfdt` rewrite are in `Spikes/MKVRemux/README.md`.
   - Audio AVPlayer can't play in HLS (TrueHD, DTS, maybe FLAC/Opus; *verify which*) is decoded with libavcodec and re-encoded. AAC 5.1 or E-AC-3 are the candidates; pick whichever keeps the channel count and works in fMP4 HLS. If none works well, route the file to MPVEngine instead.
   - MKV text subtitles (SRT/ASS) are extracted to our own overlay. ASS shows as plain text until phase 3.
+- **Cost measured in the spike:** about 16 ms to cut a 7 s stretch of 4K after a cold seek 30 minutes into a 10 GB file, and ~0.3 s to open the file, probe it and read the Cues.
 - **Fallback:** if building the playlist fails or there's no usable cue index, hand the file to MPVEngine (phase 3) or show a clear error.
 - **Done when:** a typical HEVC + E-AC-3 JOC + SRT MKV plays with HDR/DV, Spatial Audio, subtitles, instant seeking, and track switching, using under ~10% CPU on Apple Silicon.
 
@@ -343,13 +345,13 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 
 ## 9. Risks and open questions
 
-1. **MKV → HLS remuxing (phase 2)** is complex. Spike it early, and consider pulling a minimal spike forward right after milestone 1.3.
+1. **MKV → HLS remuxing (phase 2)**: the spike is done and the approach is confirmed for HEVC + Dolby Vision + E-AC-3 JOC (`Spikes/MKVRemux/README.md`). Still open: sandbox behaviour of the loopback server, Dolby Vision on a DV display, subtitles and audio fallbacks, files without Cues.
 2. **E-AC-3 JOC detection API:** no media characteristic exists, so the `dec3` parser (milestone 1.5) is the approach. Confirm it against a real JOC file and see which of the sample description atom or the magic cookie CoreMedia fills.
 3. **Audio fallback codec inside fMP4 HLS** for TrueHD/DTS: test which multichannel formats AVPlayer accepts.
-4. **MPVKit** packaging and licensing: confirm it's maintained and that an LGPL build is available.
+4. **MPVKit** packaging and licensing: an LGPL build exists (the plain `MPVKit` product, FFmpeg n9, static) and it released recently, but its README disclaims regular maintenance and points to AetherEngine for production. **Static LGPL linking** also means users must be able to relink the app with another FFmpeg, which is simplest if Halation is open source (see 7).
 5. **"Dolby Vision" naming in the UI:** same trademark concern as Atmos. **Decided in 1.9: keep "Dolby Vision"**, as a descriptive name of the format (the info panel adds the profile, e.g. "Dolby Vision 8.1"). It is written once, in `HDRFormat.badge`, so switching to a neutral label such as "DV" is a one-line change. "Dolby Atmos" stays out of all user-facing text (a test checks the badges and info panel).
 6. **Name check:** "Halation" may be used by other apps (for example photo filter apps). Search the App Store and trademarks before publishing anything public.
-7. **License for Halation itself:** MIT (with LGPL dependencies) vs GPLv3 (would allow borrowing from IINA/mpv GPL code). **Decision needed** before phase 3.
+7. **License for Halation itself:** MIT (with LGPL dependencies) vs GPLv3 (would allow borrowing from IINA/mpv GPL code). **Decision needed** before phase 3, and in practice before shipping phase 2: FFmpeg is linked statically under the LGPL, so closed distribution would need object files or another way to relink.
 
 ---
 
