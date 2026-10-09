@@ -32,6 +32,7 @@ enum PlaybackEvent: Sendable {
     case bufferingChanged(Bool)
     /// End of the loaded range around the playhead.
     case bufferedChanged(Duration)
+    case pictureInPictureChanged(Bool)
     case mediaInfoChanged(MediaInfo)
     /// Track lists or the selected tracks changed; re-read them from the engine.
     case tracksChanged
@@ -76,6 +77,13 @@ enum HDRFormat: Equatable, Sendable {
     var isHDR: Bool { self != .sdr }
 }
 
+struct Chapter: Identifiable, Equatable, Sendable {
+    /// Position in the chapter list.
+    let id: Int
+    var title: String
+    var start: Duration
+}
+
 struct MediaInfo: Equatable, Sendable {
     var container: String
     var engineName: String
@@ -89,6 +97,9 @@ struct MediaInfo: Equatable, Sendable {
     var frameRate: Double?
     /// Sum of the tracks' estimated data rates, in bits per second.
     var bitrate: Double?
+    /// The file's own title metadata, if it has any.
+    var title: String?
+    var chapters: [Chapter] = []
 
     /// What layout code should use: the display size, or the coded size when that is unknown.
     var presentationSize: CGSize? { displaySize ?? resolution }

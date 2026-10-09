@@ -34,6 +34,13 @@ protocol PlaybackEngine: AnyObject {
     /// `nil` turns subtitles off.
     func selectSubtitle(_ track: MediaTrack?)
 
+    /// A still from around `time`, no larger than `maxSize`, for artwork and scrub previews. Nil if none could be made.
+    func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage?
+
+    /// Whether the system can show this engine's video in a floating Picture in Picture window.
+    var isPictureInPictureAvailable: Bool { get }
+    func togglePictureInPicture()
+
     /// `true` stretches the picture to fill the video view's frame (an aspect-ratio override);
     /// `false` keeps its own aspect ratio inside the frame.
     var stretchesVideoToFrame: Bool { get set }

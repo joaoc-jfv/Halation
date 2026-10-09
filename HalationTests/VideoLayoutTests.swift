@@ -133,7 +133,7 @@ private func expectClose(_ actual: CGRect, _ expected: CGRect, sourceLocation: S
     }
 
     @Test func cropShortcutCyclesAndToasts() {
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         player.cycleCropByShortcut()
         #expect(player.videoLayout.crop == .r239)
         #expect(player.toast?.text == "Crop: 2.39:1")
@@ -145,7 +145,7 @@ private func expectClose(_ actual: CGRect, _ expected: CGRect, sourceLocation: S
     @Test func layoutResetsForTheNextFile() async throws {
         let url = try await TestVideo.make(seconds: 1)
         defer { try? FileManager.default.removeItem(at: url) }
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         defer { player.close() }
         player.setAspect(.r4x3)
         player.setCrop(.r185)
@@ -157,7 +157,7 @@ private func expectClose(_ actual: CGRect, _ expected: CGRect, sourceLocation: S
     }
 
     @Test func resetRestoresTheDefaults() {
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         player.setCrop(.r200)
         player.setZoom(.fill)
         player.resetVideoLayout()
@@ -167,7 +167,7 @@ private func expectClose(_ actual: CGRect, _ expected: CGRect, sourceLocation: S
     @Test func nonSquarePixelsChangeTheDisplaySizeButNotTheCodedOne() async throws {
         let url = try await TestVideo.make(seconds: 1, pixelAspectRatio: (4, 3))
         defer { try? FileManager.default.removeItem(at: url) }
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         defer { player.close() }
         player.open(url)
         await wait("media info") { player.mediaInfo != nil }
@@ -181,7 +181,7 @@ private func expectClose(_ actual: CGRect, _ expected: CGRect, sourceLocation: S
     @Test func squarePixelsKeepTheCodedSizeAsTheDisplaySize() async throws {
         let url = try await TestVideo.make(seconds: 1)
         defer { try? FileManager.default.removeItem(at: url) }
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         defer { player.close() }
         player.open(url)
         await wait("media info") { player.mediaInfo != nil }

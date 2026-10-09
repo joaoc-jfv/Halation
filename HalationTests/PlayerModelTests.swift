@@ -23,7 +23,7 @@ import Testing
     @Test func playsPausesSeeksAndEnds() async throws {
         let url = try await TestVideo.make(seconds: 2)
         defer { try? FileManager.default.removeItem(at: url) }
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         defer { player.close() }
 
         player.open(url)
@@ -57,7 +57,7 @@ import Testing
     @Test func reportsSDRForAnSDRFile() async throws {
         let url = try await TestVideo.make(seconds: 1)
         defer { try? FileManager.default.removeItem(at: url) }
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         defer { player.close() }
         player.open(url)
         await wait("media info") { player.mediaInfo != nil }
@@ -67,7 +67,7 @@ import Testing
     @Test func detectsAndPlaysHDR10() async throws {
         let url = try await TestVideo.make(seconds: 1, flavor: .hdr10HEVC)
         defer { try? FileManager.default.removeItem(at: url) }
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         defer { player.close() }
         player.open(url)
         await wait("playback to start") { player.state == .playing }
@@ -78,7 +78,7 @@ import Testing
     @Test func rateVolumeAndMuteSurviveAcrossFiles() async throws {
         let url = try await TestVideo.make(seconds: 1)
         defer { try? FileManager.default.removeItem(at: url) }
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         defer { player.close() }
 
         player.setRate(1.5)
@@ -92,7 +92,7 @@ import Testing
     }
 
     @Test func rejectsUnsupportedContainers() async {
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         player.open(URL(fileURLWithPath: "/tmp/movie.mkv"))
         await wait("failure") { player.errorMessage != nil }
         #expect(player.errorMessage == "This format isn't supported yet.")
@@ -100,7 +100,7 @@ import Testing
     }
 
     @Test func reportsMissingFiles() async {
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         player.open(URL(fileURLWithPath: "/tmp/halation-does-not-exist.mp4"))
         await wait("failure") { player.errorMessage != nil }
         #expect(player.state != .playing)
@@ -109,7 +109,7 @@ import Testing
     @Test func closeResetsState() async throws {
         let url = try await TestVideo.make(seconds: 1)
         defer { try? FileManager.default.removeItem(at: url) }
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         player.open(url)
         await wait("playback to start") { player.state == .playing }
         player.close()
@@ -141,7 +141,7 @@ import Testing
         let url = try await TestVideo.make(seconds: 3, audioLanguages: ["eng", "fra"])
         defer { try? FileManager.default.removeItem(at: url) }
         let preferences = TestPreferences.make()
-        let player = PlayerModel(preferences: preferences)
+        let player = PlayerModel(services: .testing(preferences: preferences))
         defer { player.close() }
 
         player.open(url)
@@ -169,7 +169,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: url) }
         let preferences = TestPreferences.make()
         preferences.audioLanguage = "fr"
-        let player = PlayerModel(preferences: preferences)
+        let player = PlayerModel(services: .testing(preferences: preferences))
         defer { player.close() }
 
         player.open(url)
@@ -181,11 +181,11 @@ import Testing
         let url = try await TestVideo.make(seconds: 1)
         defer { try? FileManager.default.removeItem(at: url) }
         let preferences = TestPreferences.make()
-        let player = PlayerModel(preferences: preferences)
+        let player = PlayerModel(services: .testing(preferences: preferences))
         defer { player.close() }
         player.setAudioOutputMode(.stereo)
         #expect(preferences.audioOutputMode == .stereo)
-        #expect(PlayerModel(preferences: preferences).audioOutputMode == .stereo)
+        #expect(PlayerModel(services: .testing(preferences: preferences)).audioOutputMode == .stereo)
         player.open(url)
         await wait("playback to start") { player.state == .playing }
         #expect(player.audioOutputMode == .stereo)
@@ -194,7 +194,7 @@ import Testing
     @Test func panelStateKeepsControlsUp() async throws {
         let url = try await TestVideo.make(seconds: 20)
         defer { try? FileManager.default.removeItem(at: url) }
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         defer { player.close() }
         player.autoHideDelay = .milliseconds(100)
         player.open(url)
@@ -275,7 +275,7 @@ import Testing
         let url = try await movie(withSubtitles: ["film.en.srt": srt, "film.fr.srt": srt.replacingOccurrences(of: "Hello", with: "Salut")])
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let preferences = TestPreferences.make()
-        let player = PlayerModel(preferences: preferences)
+        let player = PlayerModel(services: .testing(preferences: preferences))
         defer { player.close() }
 
         player.open(url)
@@ -294,7 +294,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let preferences = TestPreferences.make()
         preferences.subtitleChoice = .language("fr")
-        let player = PlayerModel(preferences: preferences)
+        let player = PlayerModel(services: .testing(preferences: preferences))
         defer { player.close() }
 
         player.open(url)
@@ -307,7 +307,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let preferences = TestPreferences.make()
         preferences.subtitleChoice = .off
-        let player = PlayerModel(preferences: preferences)
+        let player = PlayerModel(services: .testing(preferences: preferences))
         defer { player.close() }
 
         player.open(url)
@@ -321,7 +321,7 @@ import Testing
         let url = try await movie(withSubtitles: ["film.en.srt": srt, "film.fr.srt": srt])
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let preferences = TestPreferences.make()
-        let player = PlayerModel(preferences: preferences)
+        let player = PlayerModel(services: .testing(preferences: preferences))
         defer { player.close() }
         player.open(url)
         await wait("auto selection") { player.subtitles.selected != nil }
@@ -342,7 +342,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let preferences = TestPreferences.make()
         preferences.subtitleChoice = .off
-        let player = PlayerModel(preferences: preferences)
+        let player = PlayerModel(services: .testing(preferences: preferences))
         defer { player.close() }
         player.open(url)
         await wait("sidecars") { player.subtitles.tracks.count == 1 }
@@ -366,7 +366,7 @@ import Testing
         defer { try? FileManager.default.removeItem(at: url.deletingLastPathComponent()) }
         let extra = url.deletingLastPathComponent().appendingPathComponent("elsewhere.fr.srt")
         try srt.write(to: extra, atomically: true, encoding: .utf8)
-        let player = PlayerModel(preferences: TestPreferences.make())
+        let player = PlayerModel(services: .testing())
         defer { player.close() }
         player.open(url)
         await wait("playback") { player.state == .playing }

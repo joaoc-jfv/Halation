@@ -25,6 +25,10 @@ final class WindowController {
         }
     }
 
+    func setTitle(_ title: String) {
+        window?.title = title
+    }
+
     func exitFullScreen() {
         guard let window, window.styleMask.contains(.fullScreen) else { return }
         window.toggleFullScreen(nil)

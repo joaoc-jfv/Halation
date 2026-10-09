@@ -3,7 +3,7 @@
 > **Halation** (n.): the soft glow that forms around bright highlights on film.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core), 1.3 (video surface and window), 1.4 (Liquid Glass controls), 1.5 (tracks), 1.6 (sidecar subtitles) and 1.7 (crop, aspect, speed) are done; see §7 for the order of the rest.
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core), 1.3 (video surface and window), 1.4 (Liquid Glass controls), 1.5 (tracks), 1.6 (sidecar subtitles), 1.7 (crop, aspect, speed) and 1.8 (system integration) are done; see §7 for the order of the rest.
 
 ---
 
@@ -140,11 +140,11 @@ Halation/
 │   ├── App/            HalationApp.swift, AppDelegate.swift, AppCommands.swift
 │   ├── Engine/
 │   │   ├── PlaybackEngine.swift, PlaybackTypes.swift, EngineRouter.swift
-│   │   ├── AVFoundation/   AVFoundationEngine.swift, AVTrackMapping.swift, PlayerLayerView.swift
+│   │   ├── AVFoundation/   AVFoundationEngine.swift, AVTrackMapping.swift, PlayerLayerView.swift, PiPController.swift
 │   │   ├── Remux/          (phase 2)
 │   │   └── MPV/            (phase 3)
 │   ├── Media/          CodecNames.swift, LanguageMatching.swift, MediaProbe.swift, HDRDetection.swift, AudioFormatDetection.swift
-│   ├── Player/         PlayerModel.swift, PlayerModel+Shortcuts.swift, VideoLayout.swift, VideoGeometry.swift, TrackSelectionPolicy.swift, MediaTrack+Labels.swift, PlaybackSpeed.swift, Toast.swift, TimeFormatting.swift
+│   ├── Player/         PlayerModel.swift, PlayerModel+Shortcuts.swift, ChapterNavigation.swift, VideoLayout.swift, VideoGeometry.swift, TrackSelectionPolicy.swift, MediaTrack+Labels.swift, PlaybackSpeed.swift, Toast.swift, TimeFormatting.swift
 │   ├── Subtitles/      SubtitleCue.swift, SubtitleDecoding.swift, SRTParser.swift, WebVTTParser.swift, SubtitleMarkup.swift, SubtitleLoader.swift, SidecarSubtitles.swift, SubtitleStyle.swift, SubtitleTrackStore.swift
 │   ├── UI/
 │   │   ├── Player/     PlayerWindowView.swift, VideoSurfaceView.swift, WindowController.swift, WindowSizing.swift, OpenPanel.swift, SubtitleOverlay.swift, SubtitleLayout.swift
@@ -152,7 +152,7 @@ Halation/
 │   │   ├── Controls/   ControlBar.swift, TrackSlider.swift (scrubber and volume), PanelRow.swift, TrackPanel.swift, CropPanel.swift, SpeedPanel.swift, TrackPanel.swift, SpeedPanel.swift, CropPanel.swift, VolumeControl.swift
 │   │   ├── HUD/        InfoHUD.swift, FormatBadges.swift (Spatial Audio badge so far), OSDToast.swift
 │   │   └── Welcome/    WelcomeView.swift (drop zone + recents)
-│   ├── Services/       NowPlayingService.swift, ResumeStore.swift, RecentFiles.swift, Preferences.swift, FolderAccess.swift, PiPController.swift
+│   ├── Services/       NowPlayingService.swift, ResumeStore.swift, RecentFiles.swift, SleepPrevention.swift, PlayerServices.swift, Preferences.swift, FolderAccess.swift
 │   └── Resources/      Assets.xcassets, Info.plist, Halation.entitlements
 └── HalationTests/
 ```
@@ -211,6 +211,7 @@ Halation/
 
 ### 5.7 Other basics (phase 1)
 - **Open:** drag and drop onto the window or Dock icon, File ▸ Open (⌘O), Open Recent, "Open With" from Finder. Declare document types in Info.plist: `public.movie`, `public.mpeg-4`, `com.apple.quicktime-movie`, `public.avi`, plus imported UTIs for `org.matroska.mkv` and `org.webmproject.webm`.
+- Implementation notes (1.8): `PlayerModel` takes a `PlayerServices` bundle (preferences, folder access, Now Playing, resume, recents, sleep) and an engine factory, so tests run it with fakes and a scripted `FakeEngine`. Resume records are keyed by path, with a fallback to the same name and size for moved files. Opening is by security-scoped bookmark in Open Recent. Now Playing publishes on state, duration, seek and rate changes only (the system extrapolates the elapsed time), and the artwork is a keyframe from about 10% in. Remote command handlers hop to the main actor. Closing the window quits the app (`AppDelegate`), and quitting saves the position. Chapter navigation: `⌥→` goes to the next chapter and `⌥←` restarts the current chapter, or goes back one when it is within 3 s of its start.
 - **Resume:** save the position every ~5 s and on close, using security-scoped bookmarks. When reopening, offer "Resume from 42:10" as a glass toast with a button, auto-dismissed after ~6 s. Don't save if under 30 s in or within the last 3% of the file.
 - **Picture in Picture:** `AVPictureInPictureController(playerLayer:)`. Button in the control bar.
 - **Now Playing and media keys:** `MPNowPlayingInfoCenter` (title, duration, elapsed, rate, artwork from a frame) and `MPRemoteCommandCenter` (play, pause, toggle, skip ±10 s, change position).

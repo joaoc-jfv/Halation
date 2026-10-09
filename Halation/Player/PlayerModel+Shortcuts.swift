@@ -86,6 +86,25 @@ extension PlayerModel {
         }
     }
 
+    func chapterByShortcut(forward: Bool) {
+        registerActivity()
+        guard !chapters.isEmpty else {
+            showToast("No chapters", symbol: "list.bullet")
+            return
+        }
+        guard let chapter = forward ? nextChapter() : previousChapter() else { return }
+        showToast("\(chapter.title)", symbol: "list.bullet")
+    }
+
+    func togglePictureInPictureByShortcut() {
+        registerActivity()
+        guard isPictureInPictureAvailable else {
+            showToast("Picture in Picture isn't available", symbol: "pip")
+            return
+        }
+        togglePictureInPicture()
+    }
+
     /// `C`: None → 2.39:1 → 2.00:1 → 1.85:1 → 16:9 → 4:3 → None.
     func cycleCropByShortcut() {
         setCrop(videoLayout.crop.next)

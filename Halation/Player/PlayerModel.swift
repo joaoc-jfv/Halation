@@ -1,6 +1,8 @@
 import AppKit
 import Observation
 
+typealias EngineFactory = @MainActor (URL) throws -> any PlaybackEngine
+
 /// UI-facing playback state. The UI talks only to this type; engines stay behind it.
 @MainActor
 @Observable
@@ -29,6 +31,21 @@ final class PlayerModel {
     private(set) var controlsVisible = true
     private(set) var isPointerOverControls = false
     private(set) var toast: Toast?
+    private(set) var resumeOffer: ResumeOffer?
+    private(set) var isPictureInPictureAvailable = false
+    private(set) var isPictureInPictureActive = false
+
+    var chapters: [Chapter] { mediaInfo?.chapters ?? [] }
+    var currentChapter: Chapter? {
+        ChapterNavigation.index(at: currentTime, in: chapters).map { chapters[$0] }
+    }
+
+    /// The file's title metadata, else its file name.
+    var displayTitle: String {
+        mediaInfo?.title ?? currentURL?.deletingPathExtension().lastPathComponent ?? "Halation"
+    }
+
+    var recentFiles: RecentFiles { services.recents }
 
     var isPlaying: Bool { state == .playing }
     var hasMedia: Bool { currentURL != nil }
@@ -39,8 +56,13 @@ final class PlayerModel {
     /// Sidecar subtitle tracks, delay and style. Embedded tracks stay on the engine.
     let subtitles: SubtitleTrackStore
 
-    @ObservationIgnored private let preferences: Preferences
-    @ObservationIgnored private let folderAccess: FolderAccess
+    @ObservationIgnored private let services: PlayerServices
+    @ObservationIgnored private let engineFactory: EngineFactory
+    @ObservationIgnored private var preferences: Preferences { services.preferences }
+    @ObservationIgnored private var folderAccess: FolderAccess { services.folderAccess }
+    @ObservationIgnored private var resumeOfferTask: Task<Void, Never>?
+    @ObservationIgnored private var artworkTask: Task<Void, Never>?
+    @ObservationIgnored private var lastResumeSave: ContinuousClock.Instant?
     @ObservationIgnored private var sidecarTask: Task<Void, Never>?
     @ObservationIgnored private var engine: (any PlaybackEngine)?
     @ObservationIgnored private var openTask: Task<Void, Never>?
@@ -53,12 +75,25 @@ final class PlayerModel {
     /// How long the controls stay up without mouse or keyboard activity while playing.
     @ObservationIgnored var autoHideDelay: Duration = .seconds(2.5)
     @ObservationIgnored var toastDuration: Duration = .seconds(1.2)
+    /// How often playback progress is saved for resuming.
+    @ObservationIgnored var resumeSaveInterval: Duration = .seconds(5)
+    @ObservationIgnored var resumeOfferDuration: Duration = .seconds(6)
 
-    init(preferences: Preferences = Preferences(), folderAccess: FolderAccess = FolderAccess()) {
-        self.preferences = preferences
-        self.folderAccess = folderAccess
-        subtitles = SubtitleTrackStore(preferences: preferences, folderAccess: folderAccess)
-        audioOutputMode = preferences.audioOutputMode
+    init(
+        services: PlayerServices = .live(),
+        engineFactory: @escaping EngineFactory = EngineRouter.engine(for:)
+    ) {
+        self.services = services
+        self.engineFactory = engineFactory
+        subtitles = SubtitleTrackStore(preferences: services.preferences, folderAccess: services.folderAccess)
+        audioOutputMode = services.preferences.audioOutputMode
+        services.nowPlaying.handlers = NowPlayingHandlers(
+            play: { [weak self] in self?.play() },
+            pause: { [weak self] in self?.pause() },
+            toggle: { [weak self] in self?.togglePlayPause() },
+            skip: { [weak self] seconds in self?.skip(by: .seconds(seconds)) },
+            seek: { [weak self] seconds in self?.seek(to: .seconds(seconds), precise: true) }
+        )
     }
 
     // MARK: Opening
@@ -81,13 +116,16 @@ final class PlayerModel {
         if url.startAccessingSecurityScopedResource() { scopedURL = url }
 
         do {
-            let engine = try EngineRouter.engine(for: url)
+            let engine = try engineFactory(url)
             attach(engine)
             try await engine.load(url, startAt: nil)
             try Task.checkCancellation()
             applyTrackPreferences(to: engine)
             engine.play()
+            services.recents.note(url)
+            offerResume(for: url)
             loadSidecarSubtitles(for: url)
+            loadArtwork(from: engine)
         } catch is CancellationError {
             // Superseded by another open().
         } catch {
@@ -106,6 +144,7 @@ final class PlayerModel {
         engine.isMuted = isMuted
         engine.audioOutputMode = audioOutputMode
         engine.stretchesVideoToFrame = videoLayout.aspect != .auto
+        isPictureInPictureAvailable = engine.isPictureInPictureAvailable
         eventTask = Task { [weak self] in
             for await event in engine.events {
                 self?.handle(event)
@@ -114,6 +153,15 @@ final class PlayerModel {
     }
 
     private func teardown() {
+        saveResumePosition()
+        resumeOfferTask?.cancel()
+        resumeOffer = nil
+        artworkTask?.cancel()
+        services.sleep.setActive(false)
+        services.nowPlaying.clear()
+        lastResumeSave = nil
+        isPictureInPictureAvailable = false
+        isPictureInPictureActive = false
         sidecarTask?.cancel()
         sidecarTask = nil
         subtitles.reset()
@@ -145,11 +193,21 @@ final class PlayerModel {
             state = newState
             // A new state counts as activity: paused shows the controls, playing starts the countdown.
             registerActivity()
-        case .timeChanged(let time): currentTime = time
-        case .durationChanged(let newDuration): duration = newDuration
+            services.sleep.setActive(newState == .playing)
+            if newState == .paused || newState == .ended { saveResumePosition() }
+            publishNowPlaying()
+        case .timeChanged(let time):
+            currentTime = time
+            saveResumePositionIfDue()
+        case .durationChanged(let newDuration):
+            duration = newDuration
+            publishNowPlaying()
         case .bufferingChanged(let buffering): isBuffering = buffering
         case .bufferedChanged(let end): buffered = end
-        case .mediaInfoChanged(let info): mediaInfo = info
+        case .pictureInPictureChanged(let active): isPictureInPictureActive = active
+        case .mediaInfoChanged(let info):
+            mediaInfo = info
+            publishNowPlaying()
         case .tracksChanged: refreshTracks()
         }
     }
@@ -191,6 +249,7 @@ final class PlayerModel {
     func seek(to time: Duration, precise: Bool = false) {
         let clamped = min(max(time, .zero), duration)
         currentTime = clamped
+        publishNowPlaying()
         guard let engine else { return }
         Task { await engine.seek(to: clamped, precise: precise) }
     }
@@ -241,6 +300,83 @@ final class PlayerModel {
         hideTask = nil
     }
 
+    // MARK: Resume, Now Playing and artwork
+
+    /// Saves where playback is, so the file can offer to resume. Also called on quit.
+    func saveResumePosition() {
+        guard let url = currentURL, duration > .zero else { return }
+        services.resume.update(url: url, position: currentTime.seconds, duration: duration.seconds)
+        lastResumeSave = .now
+    }
+
+    private func saveResumePositionIfDue() {
+        guard isPlaying else { return }
+        if let last = lastResumeSave, ContinuousClock.now - last < resumeSaveInterval { return }
+        saveResumePosition()
+    }
+
+    private func offerResume(for url: URL) {
+        guard let record = services.resume.record(for: url), ResumeStore.isOfferable(record) else { return }
+        resumeOffer = ResumeOffer(position: .seconds(record.position))
+        resumeOfferTask?.cancel()
+        resumeOfferTask = Task {
+            try? await Task.sleep(for: resumeOfferDuration)
+            guard !Task.isCancelled else { return }
+            resumeOffer = nil
+        }
+    }
+
+    func acceptResumeOffer() {
+        guard let offer = resumeOffer else { return }
+        dismissResumeOffer()
+        seek(to: offer.position, precise: true)
+    }
+
+    func dismissResumeOffer() {
+        resumeOfferTask?.cancel()
+        resumeOffer = nil
+    }
+
+    private func publishNowPlaying() {
+        guard hasMedia, duration > .zero else { return }
+        services.nowPlaying.publish(NowPlayingInfo(
+            title: displayTitle, duration: duration.seconds, elapsed: currentTime.seconds,
+            rate: Double(rate), isPlaying: isPlaying
+        ))
+    }
+
+    private func loadArtwork(from engine: any PlaybackEngine) {
+        artworkTask?.cancel()
+        artworkTask = Task {
+            let time: Duration = duration > .zero ? min(duration / 10, .seconds(60)) : .seconds(5)
+            let image = await engine.thumbnail(at: time, maxSize: CGSize(width: 640, height: 640))
+            guard !Task.isCancelled else { return }
+            services.nowPlaying.setArtwork(image)
+        }
+    }
+
+    // MARK: Chapters and Picture in Picture
+
+    func goToChapter(_ chapter: Chapter) {
+        seek(to: chapter.start, precise: true)
+    }
+
+    func nextChapter() -> Chapter? {
+        guard let chapter = ChapterNavigation.next(after: currentTime, in: chapters) else { return nil }
+        goToChapter(chapter)
+        return chapter
+    }
+
+    func previousChapter() -> Chapter? {
+        guard let chapter = ChapterNavigation.previous(before: currentTime, in: chapters) else { return nil }
+        goToChapter(chapter)
+        return chapter
+    }
+
+    func togglePictureInPicture() {
+        engine?.togglePictureInPicture()
+    }
+
     // MARK: Crop, aspect and zoom
 
     func setAspect(_ aspect: VideoLayout.Aspect) { updateLayout { $0.aspect = aspect } }
@@ -286,6 +422,7 @@ final class PlayerModel {
     func setRate(_ newRate: Float) {
         rate = min(max(newRate, 0.25), 4)
         engine?.rate = rate
+        publishNowPlaying()
     }
 
     func setVolume(_ newVolume: Float) {

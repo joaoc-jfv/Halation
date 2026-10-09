@@ -11,6 +11,20 @@ struct AppCommands: Commands {
         CommandGroup(replacing: .newItem) {
             Button("Open…") { OpenPanel.chooseVideo { player.open($0) } }
                 .keyboardShortcut("o")
+            Menu("Open Recent") {
+                ForEach(player.recentFiles.entries) { entry in
+                    Button(entry.name) {
+                        if let url = player.recentFiles.resolve(entry) {
+                            player.open(url)
+                        } else {
+                            player.recentFiles.remove(entry)
+                        }
+                    }
+                }
+                Divider()
+                Button("Clear Menu") { player.recentFiles.clear() }
+                    .disabled(player.recentFiles.entries.isEmpty)
+            }
         }
 
         CommandGroup(after: .toolbar) {
@@ -34,6 +48,20 @@ struct AppCommands: Commands {
                     .keyboardShortcut(.leftArrow, modifiers: .shift)
                 Button("Skip Forward 30 Seconds") { player.seekByShortcut(seconds: 30) }
                     .keyboardShortcut(.rightArrow, modifiers: .shift)
+                Divider()
+                Button("Previous Chapter") { player.chapterByShortcut(forward: false) }
+                    .keyboardShortcut(.leftArrow, modifiers: .option)
+                Button("Next Chapter") { player.chapterByShortcut(forward: true) }
+                    .keyboardShortcut(.rightArrow, modifiers: .option)
+                Menu("Chapters") {
+                    ForEach(player.chapters) { chapter in
+                        Toggle("\(chapter.title)  (\(chapter.start.clockString))", isOn: Binding(
+                            get: { chapter == player.currentChapter },
+                            set: { _ in player.goToChapter(chapter) }
+                        ))
+                    }
+                }
+                .disabled(player.chapters.isEmpty)
                 Divider()
                 Button("Previous Frame") { player.stepFrameByShortcut(forward: false) }
                     .keyboardShortcut(",", modifiers: [])
@@ -78,6 +106,11 @@ struct AppCommands: Commands {
                         ))
                     }
                 }
+                Divider()
+                Button(player.isPictureInPictureActive ? "Exit Picture in Picture" : "Picture in Picture") {
+                    player.togglePictureInPictureByShortcut()
+                }
+                .keyboardShortcut("p", modifiers: [])
                 Divider()
                 Button("Reset Video Adjustments") { player.resetVideoLayout() }
                     .disabled(player.videoLayout.isDefault)

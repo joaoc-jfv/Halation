@@ -35,6 +35,7 @@ struct PlayerWindowView: View {
         }
         .ignoresSafeArea()
         .background(WindowAccessor { windowController.configure($0) })
+        .onChange(of: player.displayTitle) { _, title in windowController.setTitle(player.hasMedia ? title : "Halation") }
         .onChange(of: player.mediaInfo?.presentationSize) { _, size in
             if let size { windowController.fit(toVideoSize: size) }
         }
@@ -85,17 +86,22 @@ struct PlayerWindowView: View {
     }
 
     private var toast: some View {
-        VStack {
+        VStack(spacing: 10) {
             if let toast = player.toast {
                 OSDToastView(toast: toast)
                     .id(toast.id)
+                    .transition(.opacity)
+                    .allowsHitTesting(false)
+            }
+            if let offer = player.resumeOffer {
+                ResumeOfferView(offer: offer)
                     .transition(.opacity)
             }
             Spacer()
         }
         .padding(.top, 28)
-        .allowsHitTesting(false)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: player.toast)
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: player.resumeOffer)
     }
 }
 

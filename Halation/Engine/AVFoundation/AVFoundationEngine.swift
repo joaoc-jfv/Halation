@@ -11,6 +11,8 @@ final class AVFoundationEngine: PlaybackEngine {
     var videoView: NSView { surface }
 
     private var item: AVPlayerItem?
+    private var asset: AVURLAsset?
+    private var pip: PiPController?
     private var timeObserver: Any?
     private var endObserver: (any NSObjectProtocol)?
     private var playerObservations: [NSKeyValueObservation] = []
@@ -46,6 +48,9 @@ final class AVFoundationEngine: PlaybackEngine {
         (events, continuation) = AsyncStream.makeStream(of: PlaybackEvent.self)
         surface = PlayerLayerView(player: player)
         installPlayerObservers()
+        pip = PiPController(playerLayer: surface.avPlayerLayer) { [weak self] active in
+            self?.emit(.pictureInPictureChanged(active))
+        }
     }
 
     // MARK: Loading
@@ -82,6 +87,7 @@ final class AVFoundationEngine: PlaybackEngine {
         let item = AVPlayerItem(asset: asset)
         item.audioTimePitchAlgorithm = .timeDomain
         self.item = item
+        self.asset = asset
         audioGroup = audio
         subtitleGroup = subtitles
         self.audioTracks = audioTracks
@@ -136,6 +142,23 @@ final class AVFoundationEngine: PlaybackEngine {
 
     func step(frames: Int) {
         item?.step(byCount: frames)
+    }
+
+    func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage? {
+        guard let asset else { return nil }
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.maximumSize = maxSize
+        // A nearby keyframe is plenty for artwork, and much faster than an exact frame.
+        generator.requestedTimeToleranceBefore = .positiveInfinity
+        generator.requestedTimeToleranceAfter = .positiveInfinity
+        return try? await generator.image(at: time.cmTime).image
+    }
+
+    var isPictureInPictureAvailable: Bool { pip != nil }
+
+    func togglePictureInPicture() {
+        pip?.toggle()
     }
 
     var currentTime: Duration {
@@ -237,6 +260,7 @@ final class AVFoundationEngine: PlaybackEngine {
         if let endObserver { NotificationCenter.default.removeObserver(endObserver) }
         endObserver = nil
         item = nil
+        asset = nil
         audioGroup = nil
         subtitleGroup = nil
         audioTracks = []
@@ -342,6 +366,29 @@ final class AVFoundationEngine: PlaybackEngine {
             bitrate += Double(dataRate)
         }
         info.bitrate = bitrate > 0 ? bitrate : nil
+        info.title = try await Self.title(of: asset)
+        info.chapters = try await Self.chapters(of: asset)
         return info
+    }
+
+    private static func title(of asset: AVURLAsset) async throws -> String? {
+        let metadata = try await asset.load(.commonMetadata)
+        guard let item = AVMetadataItem.metadataItems(from: metadata, filteredByIdentifier: .commonIdentifierTitle).first,
+              let title = try await item.load(.stringValue)?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty
+        else { return nil }
+        return title
+    }
+
+    private static func chapters(of asset: AVURLAsset) async throws -> [Chapter] {
+        let groups = try await asset.loadChapterMetadataGroups(bestMatchingPreferredLanguages: Locale.preferredLanguages)
+        var chapters: [Chapter] = []
+        for group in groups {
+            guard let start = Duration(group.timeRange.start) else { continue }
+            let titles = AVMetadataItem.metadataItems(from: group.items, filteredByIdentifier: .commonIdentifierTitle)
+            let title = try await titles.first?.load(.stringValue)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            chapters.append(Chapter(id: chapters.count, title: title.flatMap { $0.isEmpty ? nil : $0 } ?? "Chapter \(chapters.count + 1)", start: start))
+        }
+        return chapters.sorted { $0.start < $1.start }.enumerated().map { Chapter(id: $0.offset, title: $0.element.title, start: $0.element.start) }
     }
 }

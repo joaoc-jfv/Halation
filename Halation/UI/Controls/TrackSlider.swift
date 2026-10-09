@@ -7,6 +7,8 @@ struct TrackSlider: View {
     let value: Double
     /// 0...1
     var buffered: Double?
+    /// Tick marks (0...1), such as chapter starts.
+    var marks: [Double] = []
     /// The value being dragged to, if any. The owner can show it elsewhere (e.g. as a time).
     @Binding var dragValue: Double?
     var label: LocalizedStringKey
@@ -33,6 +35,12 @@ struct TrackSlider: View {
                     Capsule().fill(.white.opacity(0.3)).frame(width: width * min(max(buffered, 0), 1))
                 }
                 Capsule().fill(.white).frame(width: width * shown)
+                ForEach(marks, id: \.self) { mark in
+                    Rectangle()
+                        .fill(.black.opacity(0.55))
+                        .frame(width: 2, height: isActive ? 8 : 4)
+                        .offset(x: width * mark - 1)
+                }
             }
             .frame(height: isActive ? 8 : 4)
             .overlay(alignment: .leading) {

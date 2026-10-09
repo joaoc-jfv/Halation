@@ -48,6 +48,12 @@ struct ControlBar: View {
                 isActive: player.activePanel == .crop || !player.videoLayout.isDefault
             ) { player.togglePanel(.crop) }
             speedButton
+            if player.isPictureInPictureAvailable {
+                ControlButton(
+                    symbol: player.isPictureInPictureActive ? "pip.exit" : "pip.enter", label: "Picture in Picture",
+                    isActive: player.isPictureInPictureActive
+                ) { player.togglePictureInPicture() }
+            }
             ControlButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Full Screen", action: onToggleFullScreen)
         }
     }
@@ -68,9 +74,11 @@ struct ControlBar: View {
         TrackSlider(
             value: durationSeconds > 0 ? player.currentTime.seconds / durationSeconds : 0,
             buffered: durationSeconds > 0 ? player.buffered.seconds / durationSeconds : nil,
+            marks: ChapterNavigation.marks(for: player.chapters, duration: player.duration),
             dragValue: $scrubFraction,
             label: "Playback position",
-            valueDescription: "\(player.currentTime.clockString) of \(player.duration.clockString)",
+            valueDescription: "\(player.currentTime.clockString) of \(player.duration.clockString)"
+                + (player.currentChapter.map { ", chapter: \($0.title)" } ?? ""),
             onCommit: { player.seek(to: .seconds($0 * durationSeconds), precise: true) },
             onAdjust: { player.skip(by: .seconds(Double($0) * 5)) }
         )
