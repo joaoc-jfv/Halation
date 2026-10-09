@@ -117,7 +117,7 @@ private struct Clip {
         #expect(model.mediaInfo?.engineName == "AVFoundation (remuxed)")
         #expect(model.mediaInfo?.videoCodec == "H.264")
         #expect(model.mediaInfo?.resolution == CGSize(width: 320, height: 240))
-        #expect(model.audioTracks.count == 1)
+        #expect(model.audioTracks.count == 2)
 
         // Into the second segment (it starts at 6 s) and across the boundary.
         model.seek(to: .seconds(5), precise: true)
@@ -139,7 +139,7 @@ private struct Clip {
 
         model.open(clip.mkv)
         await waitUntil("playback", timeout: .seconds(15)) { model.state == .playing }
-        #expect(model.audioTracks.count == 1)
+        #expect(model.audioTracks.count == 2)
         #expect(LanguageMatching.matches(model.selectedAudio?.language, "fr"))
     }
 

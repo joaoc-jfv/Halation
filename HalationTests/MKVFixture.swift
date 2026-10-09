@@ -10,6 +10,8 @@ enum MKVFixture {
         var dolbyVision: (profile: UInt8, compatibilityID: UInt8)?
         /// Adds a text subtitle track with one cue.
         var subtitle: (language: String, forced: Bool)?
+        /// Adds an ASS track (language) with three events: styled text over two lines, a vector drawing, and text with a comma.
+        var assSubtitle: String?
         /// Live mode writes no Cues, like a file recorded without an index.
         var withoutCues = false
     }
@@ -59,6 +61,20 @@ enum MKVFixture {
             subtitleStream = stream
         }
 
+        var assStream: UnsafeMutablePointer<AVStream>?
+        if let language = options.assSubtitle {
+            let stream = avformat_new_stream(output, nil)!
+            stream.pointee.codecpar.pointee.codec_type = AVMEDIA_TYPE_SUBTITLE
+            stream.pointee.codecpar.pointee.codec_id = AV_CODEC_ID_ASS
+            stream.pointee.time_base = AVRational(num: 1, den: 1000)
+            let header = Array("[Script Info]\nScriptType: v4.00+\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n".utf8)
+            stream.pointee.codecpar.pointee.extradata = av_mallocz(header.count + Int(AV_INPUT_BUFFER_PADDING_SIZE))!.bindMemory(to: UInt8.self, capacity: header.count)
+            stream.pointee.codecpar.pointee.extradata.update(from: header, count: header.count)
+            stream.pointee.codecpar.pointee.extradata_size = Int32(header.count)
+            av_dict_set(&stream.pointee.metadata, "language", language, 0)
+            assStream = stream
+        }
+
         try addChapters(options.chapters, to: output)
 
         var muxerOptions: OpaquePointer?
@@ -77,6 +93,26 @@ enum MKVFixture {
             packet.pointee.dts = 500
             packet.pointee.duration = 1500
             try check(av_interleaved_write_frame(output, packet), "write subtitle")
+        }
+
+        if let assStream {
+            let packet = av_packet_alloc()!
+            defer { var owned: UnsafeMutablePointer<AVPacket>? = packet; av_packet_free(&owned) }
+            let events: [(Int64, Int64, String)] = [
+                (3000, 1000, "0,0,Default,,0,0,0,,{\\i1}Styled{\\i0}\\Nsecond line"),
+                (5000, 500, "1,0,Default,,0,0,0,,{\\p1}m 0 0 l 10 10{\\p0}"),
+                (6000, 1000, "2,0,Default,,0,0,0,,Comma, inside"),
+            ]
+            for (start, length, line) in events {
+                let text = Array(line.utf8)
+                try check(av_new_packet(packet, Int32(text.count)), "packet")
+                text.withUnsafeBufferPointer { packet.pointee.data.update(from: $0.baseAddress!, count: text.count) }
+                packet.pointee.stream_index = assStream.pointee.index
+                packet.pointee.pts = start
+                packet.pointee.dts = start
+                packet.pointee.duration = length
+                try check(av_interleaved_write_frame(output, packet), "write ass")
+            }
         }
 
         let packet = av_packet_alloc()!

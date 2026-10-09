@@ -20,7 +20,7 @@ struct PlayerWindowView: View {
                     layout: player.videoLayout
                 ) { windowController.toggleFullScreen() }
             }
-            if player.subtitles.selected != nil {
+            if player.drawsSubtitles {
                 SubtitleOverlay()
             }
             if !showsControls {

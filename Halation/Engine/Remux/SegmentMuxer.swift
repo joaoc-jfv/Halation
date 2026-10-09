@@ -108,6 +108,21 @@ final class SegmentMuxer: @unchecked Sendable {
         }
     }
 
+    /// A complete video-only MP4 that starts at the keyframe `keyframe` and runs a fraction of a second: enough for a still.
+    /// It isn't cached, so scrubbing through thumbnails doesn't push playback's segments out.
+    func stillClip(at keyframe: Duration) async throws -> Data {
+        try await withCheckedThrowingContinuation { continuation in
+            queue.async { [self] in
+                continuation.resume(with: Result {
+                    guard let input else { throw Failure.cannotCut("the file was closed") }
+                    let length = Duration.milliseconds(600)
+                    let spec = SegmentSpec(index: 0, start: keyframe, end: keyframe + length, duration: length)
+                    return Data(try Self.cut(spec, from: input, videoIndex: videoIndex, audioIndex: nil).bytes)
+                })
+            }
+        }
+    }
+
     private func cutOnQueue(_ index: Int) throws -> Data {
         if let hit = cache[index] {
             cacheOrder.removeAll { $0 == index }

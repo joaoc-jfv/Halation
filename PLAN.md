@@ -3,13 +3,13 @@
 > **Halation** (n.): the soft glow that forms around bright highlights on film.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** Phase 1 (milestones 1.1 to 1.10) is done, the phase 2 spike is done, and milestones 2.1 (FFmpeg, `MKVProbe`, loopback server) and 2.2 (`RemuxEngine`) are done. Phase 1: Halation plays MP4, MOV and M4V with everything in §5 and §6. MKV and the other containers are phases 2 and 3 (opening one shows "This format isn't supported yet.").
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** Phase 1 (milestones 1.1 to 1.10) is done, the phase 2 spike is done, and milestones 2.1 (FFmpeg, `MKVProbe`, loopback server), 2.2 (`RemuxEngine`) and 2.3 (MKV tracks and thumbnails) are done. Phase 1: Halation plays MP4, MOV and M4V with everything in §5 and §6. MKV and the other containers are phases 2 and 3 (opening one shows "This format isn't supported yet.").
 
 ---
 
 ## 0. Where things stand (read this first)
 
-*Written at the end of milestone 2.2 so work can continue from a fresh chat. Everything below is also true in the code and tests; the rest of this file is the design.*
+*Written at the end of milestone 2.3 so work can continue from a fresh chat. Everything below is also true in the code and tests; the rest of this file is the design.*
 
 ### State
 
@@ -19,24 +19,20 @@ This document is the full build plan. It is written so that an engineer (or anot
 | Phase 2 spike (`Spikes/MKVRemux/`) | **Done.** Approach confirmed on a real 4K Dolby Vision 8.1 + E-AC-3 JOC MKV; its README has the measurements. |
 | 2.1 FFmpeg, `MKVProbe`, `LoopbackServer`, entitlements | **Done.** |
 | 2.2 `RemuxEngine` (MKV plays, HDR/DV, Spatial Audio, seeking) | **Done.** Verified on the real file, not just generated clips. |
-| **2.3 Tracks (next)**, 2.4 Hardening | Not started. Details below. |
+| 2.3 Tracks: audio switching, MKV subtitles, thumbnails | **Done.** Verified on the real file (see 2.3 notes). |
+| **2.4 Hardening (next)** | Not started. Details below. |
 | Phase 3 (mpv fallback), Phase 4 | Not started. |
 
-287 tests pass (`xcodebuild … test`). The Release app is 40 MB (FFmpeg is ~31 MB of that). One commit per milestone; `git log` is the history.
+302 tests pass (`xcodebuild … test`). The Release app is 40 MB (FFmpeg is ~31 MB of that). One commit per milestone; `git log` is the history.
 
 ### To start a session
 1. Read `CLAUDE.md`, this section, §7 Phase 2, and `Spikes/MKVRemux/README.md`.
 2. `xcodegen generate && xcodebuild -scheme Halation -destination 'platform=macOS' test`. The first build downloads the FFmpeg binaries (~100 MB).
 3. `TestMedia/` (gitignored, never commit) holds one real file for manual checks: a 3840×1920 HEVC Dolby Vision profile 8.1 MKV, 55 minutes, 10.6 GB, two E-AC-3 5.1 JOC audio tracks (Italian first and default, then English), and 46 SRT subtitle tracks (including Forced and SDH). Open it with `open -a <built Halation.app> <file>`.
 
-### Next: milestone 2.3 (tracks)
-Both pieces plug into code that already exists; what's new is the MKV side.
-- **Audio track switching.** Today `RemuxEngine` remuxes one audio track chosen before playback (`RemuxSession.plan`) and `selectAudio` does nothing. Simplest robust design: expose every copyable audio stream as a `MediaTrack` (the probe already has them) and, on selection, start a new `RemuxSession` with that stream and `inner.load(newURL, startAt: currentTime)`, keeping the play state (a brief gap is acceptable). The nicer alternative is HLS alternate renditions (`#EXT-X-MEDIA:TYPE=AUDIO`, audio-only fMP4 segments aligned to the same boundaries), which gives seamless switching and real `AVMediaSelectionGroup` tracks, but is untested here. The spike muxes audio and video together and that is known to work.
-- **Subtitles from the MKV.** The file has text tracks (`subrip`; `ass` is possible). Matroska interleaves them through the whole file, so reading one track means scanning the file: do it in the background when the user picks a track (and cache the cues), showing them as they arrive. Packets are plain text for SubRip; ASS packets are `ReadOrder,Layer,Style,Name,MarginL,MarginR,MarginV,Effect,Text`, so keep the last field and strip `{\…}` overrides (`SubtitleMarkup` already does the latter). Feed the existing `SubtitleTrackStore` (add a track source that isn't a file URL), so the overlay, delay, style, Z/X, remembered language and the S-key cycle all work unchanged. Use `isForced`/`isDefault` from the probe with `TrackSelectionPolicy`.
-- **Thumbnails** for MKV (Now Playing artwork, welcome posters, scrub previews): `AVAssetImageGenerator` can't read an HLS stream. Idea: serve "init + one segment" as a standalone MP4 from the loopback server and generate the still from that. Until then the scrub preview shows only the time (`PlayerModel.scrubThumbnailsAvailable`).
-- Wire the new tracks into `TrackPanel`/menus: they already list `engine.audioTracks`/`subtitleTracks`.
+### Next: milestone 2.4 (hardening)
+See the list below; 2.3 is described in §7 ("2.3 notes").
 
-### Then: milestone 2.4 (hardening)
 - Audio AVPlayer can't play (DTS, TrueHD, Opus, MP3, Vorbis): decode with libavcodec and re-encode (E-AC-3 or AAC 5.1, keep the channel count). The FFmpeg build has the native `eac3`/`ac3`/`aac`/`flac` encoders; libswresample is linked. Currently these files fail with "This file's audio (DTS) isn't supported yet.".
 - Files without Cues (no seek index): scan once for keyframes. Currently refused.
 - AV1: needs `av1C` codec strings in `HLSPlaylists` and a hardware-support check; untested for lack of a file. VP9/MPEG-2/etc. belong to phase 3.
@@ -44,7 +40,7 @@ Both pieces plug into code that already exists; what's new is the MKV side.
 
 ### Known gaps and things not verified
 - **Not verified by eye or ear (needs a person):** Dolby Vision actually switching the display into DV mode; how the JOC track sounds on AirPods; HDR brightness on screen. The data path (tags, sample entries, flags, pixel format) is verified.
-- No MKV subtitles, no audio switching, no MKV thumbnails (2.3).
+- Not verified by ear: that switching audio sounds right on AirPods (the owner reports Spatial Audio works). Not measured: how long the one-pass subtitle scan takes on a cold disk for the 10.6 GB file (subtitles were showing within seconds in the real app), and ASS styling beyond plain text (phase 3). Bitmap subtitles (PGS, VobSub) aren't read.
 - The sandbox's folder-access prompt for sidecar subtitles couldn't be exercised end to end (only its failure path is tested).
 - `Halation.app` is signed ad hoc, so Hardened Runtime is off; real signing, notarization and Sparkle are phase 4.
 
@@ -353,7 +349,7 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 |---|---|---|
 | 2.1 | **Groundwork**: FFmpeg as a dependency (`Packages/FFmpegKit`), `MKVProbe` (tracks, HDR/DV, chapters, keyframe index), the production `LoopbackServer`, sandbox entitlements | The sandboxed app links FFmpeg, probes generated MKVs in tests, and AVPlayer plays a file it fetches from the loopback server. **Done.** |
 | 2.2 | **`RemuxEngine`**: playlists from the keyframe index, per-segment muxing with the `tfdt` rewrite, shared init, HLS served by the loopback server, `EngineRouter` sends MKV there | A real HEVC + E-AC-3 MKV plays in the app with HDR/DV, Spatial Audio, instant seeking. **Done.** |
-| 2.3 | **Tracks**: audio track switching, text subtitles extracted into the existing overlay, chapters from the file, `MediaInfo`/HUD for MKV | Switching audio and subtitles works on a multi-track MKV |
+| 2.3 | **Tracks**: audio track switching, text subtitles extracted into the existing overlay, chapters from the file, `MediaInfo`/HUD for MKV, thumbnails | Switching audio and subtitles works on a multi-track MKV. **Done.** |
 | 2.4 | **Audio fallback and hardening**: tracks AVPlayer can't play, files without Cues, error states, CPU and memory check | A typical MKV plays with under ~10% CPU; odd files fail with a clear message |
 
 2.1 notes:
@@ -369,7 +365,14 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 - **Choices made.** Audio: the remembered language if a copyable track matches, else the file's default, else the first (`RemuxSupport.chooseAudio`; the model passes the remembered language in through `PlaybackEngine.preferredAudioLanguage`). Copyable video: HEVC and H.264 only. Copyable audio: AAC, AC-3, E-AC-3, ALAC, FLAC. A file without audio plays video-only. Segments: at least 6 s, cut at keyframes; a tail under 3 s joins the previous segment. A bounded cache (160 MB) keeps recent segments.
 - **Refusals with a message** (`RemuxSession.plan`): no video, unsupported video codec, only unsupported audio (DTS, TrueHD, ...), and no seek index (no Cues).
 - **Measured on the real file:** opens and shows the first frame within about a second; a click at 60% lands on the right scene; CPU 8–10% and ~230–300 MB resident while playing 4K Dolby Vision; the info panel shows HEVC 3840×1920, 23.976 fps, 25.8 Mb/s, Dolby Vision 8.1, BT.2020, PQ, Italian E-AC-3 5.1 with the Spatial Audio flag.
-- **Not done in 2.2** (see "Where things stand" for the plan): switching audio tracks, any subtitle track from the MKV, thumbnails (scrub preview shows only the time, no poster or Now Playing artwork for MKV), files without Cues, audio AVPlayer can't play, AV1.
+- **Not done in 2.2** (2.3 did the first three): switching audio tracks, any subtitle track from the MKV, thumbnails; still open: files without Cues, audio AVPlayer can't play, AV1.
+2.3 notes (done; checked on the real 10.6 GB file: both audio tracks listed with the Spatial Audio tag, 46 subtitle tracks listed, English subtitles matching the dialogue, switching audio with `A` keeps the position, scrub previews show frames):
+- **Audio switching.** `RemuxEngine` lists every copyable audio track. Choosing one starts a new `RemuxSession` for that stream (reusing the probe), reloads the inner engine at the current time and resumes if it was playing (a brief gap; the engine remembers whether play was last requested and sets that state explicitly after the reload, because a new item inherits the player's rate). Several quick picks collapse into the last one; a failed switch keeps the old track. The playing track's Spatial flag comes from its init segment; the other E-AC-3 tracks are checked in the background by opening a throwaway muxer (`RemuxSession.detectSpatial`) and the list updates when it answers. HLS alternate renditions were not tried.
+- **Subtitles.** `MKVSubtitleReader` makes one pass over the file after playback starts and collects every text track at once (SubRip, ASS/SSA, WebVTT; ASS text is the part after the eighth comma, `\N` becomes a newline, vector drawings are dropped, overrides are stripped by `SubtitleMarkup`). Results arrive about once a second into a `SubtitleCueStore`. They are *not* routed through `SubtitleTrackStore`: the tracks are the engine's `subtitleTracks` (so forced/default flags, `TrackSelectionPolicy`, the remembered language, the S key and the menus work unchanged) and the new protocol method `PlaybackEngine.subtitleCues(for:)` hands the cues to `PlayerModel.activeSubtitleCues()`. `drawsSubtitles` decides whether the overlay and the delay controls apply, so Z/X delay works on MKV subtitles too. AVFoundation tracks keep rendering natively.
+- **Thumbnails.** `SegmentMuxer.stillClip(at:)` cuts the keyframe at or before the time (0.6 s, video only, not cached) into a standalone MP4; `RemuxEngine.thumbnail` writes it to a temp file and uses `AVAssetImageGenerator` on it. The muxer keeps the keyframe's place in the file as an empty edit, so the image is requested at the keyframe's own time, not at zero. This also gives MKV welcome posters and Now Playing artwork.
+- **HDR check of the remux path.** The display's EDR headroom rises from 1.2 to ~15 while the real file plays, and a dark shot cut from it renders at the same mean luma in QuickTime Player (29.0, plain MP4 from the spike tool), Halation playing that MP4 (28.9) and Halation playing the MKV (27.3), so the remux path looks like QuickTime's. The owner also confirmed by eye that HDR and Spatial Audio work. (`screencapture` tone-maps HDR, so those numbers show equivalence, not absolute brightness.)
+- Test gotcha: `PlayerModel.seek` sets `currentTime` at once, so a test that waits on `model.currentTime` doesn't wait for the engine; use `model.livePlaybackTime()`.
+- The track panel's subtitle list now scrolls (max 320 pt), because a file can carry dozens of tracks.
 - **Spike done** (`Spikes/MKVRemux/`, see its README): the approach below works on a real 4K Dolby Vision 8.1 + E-AC-3 JOC MKV, with two changes to the original plan. The transport is a **loopback HTTP server**, because `AVAssetResourceLoader` cannot feed HLS media (`-12881`). And every segment is cut by seeking and **using a fresh muxer, then rewriting `tfdt`**, with one init shared by all segments.
 - Add FFmpeg libraries. The spike used MPVKit `1.1.0-n9.0.2` (FFmpeg n9, LGPL, static). Its README says it is "only suitable for learning" and "will not be maintained too frequently" (it did ship a release on 2026-10-07). Options for the real build: depend on MPVKit's FFmpeg binary targets only (Libavformat, Libavcodec, Libavutil, pinned by checksum), or depend on AetherEngine, which already implements this whole architecture (LGPL-3.0 with an App Store exception) and could be used as a dependency or as a reference.
 - `MKVProbe`: read tracks, codecs, cues (keyframe index), chapters, and attachments with libavformat.

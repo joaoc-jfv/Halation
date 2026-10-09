@@ -33,9 +33,11 @@ final class RemuxSession: @unchecked Sendable {
         playbackURL = url
     }
 
-    static func start(url: URL, preferredAudioLanguage: String?) async throws -> RemuxSession {
-        let probe = try await MKVProbe.probe(url: url)
-        let plan = try plan(for: probe, preferredAudioLanguage: preferredAudioLanguage)
+    /// Pass the `probe` of an earlier session on the same file to skip probing it again (switching audio tracks), and
+    /// `audioStreamID` to play that track instead of choosing one.
+    static func start(url: URL, probe knownProbe: MKVProbeResult? = nil, audioStreamID: Int? = nil, preferredAudioLanguage: String?) async throws -> RemuxSession {
+        let probe = if let knownProbe { knownProbe } else { try await MKVProbe.probe(url: url) }
+        let plan = try plan(for: probe, preferredAudioLanguage: preferredAudioLanguage, audioStreamID: audioStreamID)
         try Task.checkCancellation()
 
         let muxer = try await SegmentMuxer.open(path: url.path, video: plan.video, audio: plan.audio, segments: plan.segments)
@@ -88,14 +90,15 @@ final class RemuxSession: @unchecked Sendable {
     }
 
     /// Decides what to copy, or says why the file can't be played yet. Pure, so each refusal is tested.
-    static func plan(for probe: MKVProbeResult, preferredAudioLanguage: String?) throws -> Plan {
+    static func plan(for probe: MKVProbeResult, preferredAudioLanguage: String?, audioStreamID: Int? = nil) throws -> Plan {
         guard let video = probe.video.first else { throw Failure(message: "This file has no video.") }
         guard RemuxSupport.canCopyVideo(codec: video.codec) else {
             throw Failure(message: "This file's video (\(video.codec.uppercased())) isn't supported yet.")
         }
         var audio: ProbedStream?
         if !probe.audio.isEmpty {
-            audio = RemuxSupport.chooseAudio(from: probe.streams, preferredLanguage: preferredAudioLanguage)
+            audio = probe.audio.first { $0.id == audioStreamID && RemuxSupport.canCopyAudio(codec: $0.codec) }
+                ?? RemuxSupport.chooseAudio(from: probe.streams, preferredLanguage: preferredAudioLanguage)
             guard audio != nil else {
                 let names = Set(probe.audio.map { $0.codec.uppercased() }).sorted().joined(separator: ", ")
                 throw Failure(message: "This file's audio (\(names)) isn't supported yet.")
@@ -118,8 +121,33 @@ final class RemuxSession: @unchecked Sendable {
     /// that from the E-AC-3 bitstream and writes it into the `dec3` record).
     var audioTrack: MediaTrack? {
         guard let audio else { return nil }
-        let isSpatial = audio.codec == "eac3" && (MP4Boxes.payload(of: "dec3", in: muxer.initSegment).map { AudioFormatDetection.isJOC(dec3: Data($0)) } ?? false)
-        return Self.mediaTrack(for: audio, isSpatial: isSpatial)
+        return Self.mediaTrack(for: audio, isSpatial: Self.isSpatial(audio, initSegment: muxer.initSegment))
+    }
+
+    private static func isSpatial(_ audio: ProbedStream, initSegment: [UInt8]) -> Bool {
+        audio.codec == "eac3" && (MP4Boxes.payload(of: "dec3", in: initSegment).map { AudioFormatDetection.isJOC(dec3: Data($0)) } ?? false)
+    }
+
+    /// Whether an audio track that isn't playing carries Spatial Audio objects. Only the muxer can tell (it reads the
+    /// E-AC-3 bitstream), so this opens one briefly and looks at the init segment it writes.
+    static func detectSpatial(path: String, video: ProbedStream, audio: ProbedStream, segments: [SegmentSpec]) async -> Bool {
+        guard audio.codec == "eac3", let first = segments.first,
+              let muxer = try? await SegmentMuxer.open(path: path, video: video, audio: audio, segments: [first])
+        else { return false }
+        defer { muxer.close() }
+        return isSpatial(audio, initSegment: muxer.initSegment)
+    }
+
+    /// A small standalone MP4 holding the video keyframe at or just before `time`: the engine turns it into a still, because
+    /// AVFoundation can't make images from an HLS stream.
+    func stillClip(near time: Duration) async throws -> (data: Data, keyframe: Duration) {
+        var low = 0, high = probe.keyframes.count
+        while low < high {
+            let mid = (low + high) / 2
+            if probe.keyframes[mid] <= time { low = mid + 1 } else { high = mid }
+        }
+        let keyframe = probe.keyframes[max(0, low - 1)]
+        return (try await muxer.stillClip(at: keyframe), keyframe)
     }
 
     func stop() {

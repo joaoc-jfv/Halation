@@ -123,6 +123,7 @@ final class AVFoundationEngine: PlaybackEngine {
 
     func play() {
         guard item != nil else { return }
+        isPlaying = true
         if didReachEnd {
             didReachEnd = false
             player.seek(to: .zero)
@@ -131,6 +132,7 @@ final class AVFoundationEngine: PlaybackEngine {
     }
 
     func pause() {
+        isPlaying = false
         player.pause()
     }
 
@@ -165,6 +167,9 @@ final class AVFoundationEngine: PlaybackEngine {
     func togglePictureInPicture() {
         pip?.toggle()
     }
+
+    /// Whether play was the last thing asked for (not what AVPlayer reports, which lags and flickers while seeking or loading).
+    private(set) var isPlaying = false
 
     var currentTime: Duration {
         Duration(player.currentTime()) ?? .zero

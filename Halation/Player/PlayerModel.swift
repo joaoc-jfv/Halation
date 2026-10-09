@@ -37,7 +37,7 @@ final class PlayerModel {
     private(set) var isHDRPlaybackEligible = false
     private(set) var showsInfoPanel = false
     private(set) var scrubPreview: ScrubPreview?
-    /// False once the engine has answered a thumbnail request with nothing (the remux engine can't make stills yet),
+    /// False once the engine has answered a thumbnail request with nothing (the engine has no picture to give),
     /// so the scrub preview shows just the time instead of an empty box.
     private(set) var scrubThumbnailsAvailable = true
 
@@ -618,7 +618,7 @@ final class PlayerModel {
 
     func adjustSubtitleDelayByShortcut(_ offset: Duration) {
         registerActivity()
-        guard subtitles.selected != nil else {
+        guard drawsSubtitles else {
             showToast("Delay needs a subtitle file", symbol: "captions.bubble")
             return
         }
@@ -637,8 +637,19 @@ final class PlayerModel {
     }
 
     func activeSubtitleCues() -> [SubtitleCue] {
-        subtitles.activeCues(atPlaybackTime: isPlaying ? livePlaybackTime() : currentTime)
+        let time = isPlaying ? livePlaybackTime() : currentTime
+        if subtitles.selected != nil { return subtitles.activeCues(atPlaybackTime: time) }
+        return engineDrawnCues?.active(at: time - subtitles.delay) ?? []
     }
+
+    /// The cues of the selected embedded track when the engine hands them over to be drawn by the app (MKV text subtitles),
+    /// else nil: AVFoundation draws its own tracks.
+    private var engineDrawnCues: SubtitleCueList? {
+        selectedSubtitle.flatMap { engine?.subtitleCues(for: $0) }
+    }
+
+    /// Whether the app draws a subtitle over the video, so the overlay and the delay controls apply.
+    var drawsSubtitles: Bool { subtitles.selected != nil || engineDrawnCues != nil }
 
     /// Switches audio track mid-playback and remembers its language for the next file.
     func selectAudio(_ track: MediaTrack?) {

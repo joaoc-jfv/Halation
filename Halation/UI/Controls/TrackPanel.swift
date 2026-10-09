@@ -48,19 +48,26 @@ struct TrackPanel: View {
     private var subtitleColumn: some View {
         VStack(alignment: .leading, spacing: 4) {
             heading("Subtitles")
-            TrackRow(title: "Off", isSelected: !player.hasVisibleSubtitle) {
-                player.selectSubtitle(nil)
-            }
-            ForEach(player.selectableSubtitleTracks) { track in
-                TrackRow(track: track, isSelected: track == player.displayedSubtitle) {
-                    player.selectSubtitle(track)
+            // A file can carry dozens of subtitle tracks, so the list scrolls instead of growing past the window.
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    TrackRow(title: "Off", isSelected: !player.hasVisibleSubtitle) {
+                        player.selectSubtitle(nil)
+                    }
+                    ForEach(player.selectableSubtitleTracks) { track in
+                        TrackRow(track: track, isSelected: track == player.displayedSubtitle) {
+                            player.selectSubtitle(track)
+                        }
+                    }
+                    ForEach(player.subtitles.tracks) { track in
+                        TrackRow(title: track.label, detail: "Subtitle file", isSelected: track == player.subtitles.selected) {
+                            player.selectExternalSubtitle(track)
+                        }
+                    }
                 }
             }
-            ForEach(player.subtitles.tracks) { track in
-                TrackRow(title: track.label, detail: "Subtitle file", isSelected: track == player.subtitles.selected) {
-                    player.selectExternalSubtitle(track)
-                }
-            }
+            .frame(maxHeight: 320)
+            .scrollBounceBehavior(.basedOnSize)
             if player.selectableSubtitleTracks.isEmpty && player.subtitles.tracks.isEmpty {
                 emptyNote("No subtitles found")
             }
@@ -73,7 +80,7 @@ struct TrackPanel: View {
                     player.requestSidecarFolderAccess()
                 }
             }
-            if player.subtitles.selected != nil {
+            if player.drawsSubtitles {
                 Text("Delay \(player.subtitles.delayLabel) · Z / X to adjust")
                     .font(.caption)
                     .foregroundStyle(.secondary)

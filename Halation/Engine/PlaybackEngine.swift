@@ -34,6 +34,10 @@ protocol PlaybackEngine: AnyObject {
     /// `nil` turns subtitles off.
     func selectSubtitle(_ track: MediaTrack?)
 
+    /// The cues of a text subtitle track the engine reads itself and the app draws over the video (MKV subtitles), found so far.
+    /// Nil for a track the engine renders natively.
+    func subtitleCues(for track: MediaTrack) -> SubtitleCueList?
+
     /// A still from around `time`, no larger than `maxSize`, for artwork and scrub previews. Nil if none could be made.
     func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage?
 
@@ -54,4 +58,8 @@ protocol PlaybackEngine: AnyObject {
     var audioOutputMode: AudioOutputMode { get set }
     var capabilities: EngineCapabilities { get }
     func close()
+}
+
+extension PlaybackEngine {
+    func subtitleCues(for track: MediaTrack) -> SubtitleCueList? { nil }
 }
