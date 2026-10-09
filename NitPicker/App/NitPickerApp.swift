@@ -20,7 +20,7 @@ struct NitPickerApp: App {
         .commands { AppCommands(player: player) }
 
         Settings {
-            SubtitleSettingsView()
+            SettingsView()
                 .environment(player)
         }
     }

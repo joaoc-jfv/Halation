@@ -49,6 +49,7 @@ final class MPVEngine: PlaybackEngine {
     private var addedSubtitleIDs: [String: Int] = [:]
 
     private var resizeTask: Task<Void, Never>?
+    private var remeasures = 0
 
     init() {
         (events, continuation) = AsyncStream.makeStream(of: PlaybackEvent.self)
@@ -163,6 +164,10 @@ final class MPVEngine: PlaybackEngine {
     /// layer keeps showing the last frame, scaled by Core Animation, until the new one is drawn.
     private func drawableSizeChanged() {
         guard isLoaded else { return }
+        scheduleRemeasure()
+    }
+
+    private func scheduleRemeasure() {
         resizeTask?.cancel()
         resizeTask = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(300))
@@ -174,7 +179,13 @@ final class MPVEngine: PlaybackEngine {
     private func remeasureOutput() {
         guard let mpv, isLoaded, let width = mpv.int("osd-dimensions/w"), let height = mpv.int("osd-dimensions/h") else { return }
         let size = view.metalLayer.drawableSize
-        guard width > 0, abs(Double(width) - size.width) > 2 || abs(Double(height) - size.height) > 2 else { return }
+        guard width > 0, abs(Double(width) - size.width) > 2 || abs(Double(height) - size.height) > 2 else {
+            remeasures = 0
+            return
+        }
+        // A size mpv keeps reporting wrongly must not loop.
+        guard remeasures < 3 else { return }
+        remeasures += 1
         Self.log.debug("restarting the video output: \(width)x\(height) -> \(Int(size.width))x\(Int(size.height))")
         guard let track = mpv.int("vid") else { return }
         mpv.set("vid", string: "no")
@@ -190,10 +201,13 @@ final class MPVEngine: PlaybackEngine {
             refreshTracks()
             refreshMediaInfo()
             probeSourceHDR()
+            // The video output may have started before the view had its size (it then measures 1×1).
+            scheduleRemeasure()
             if let duration = mpv?.double("duration"), duration > 0 { emit(.durationChanged(.seconds(duration))) }
             refreshState()
             resumeLoad(with: nil)
         case .playbackRestart:
+            if remeasures == 0 { scheduleRemeasure() }
             emitTime(force: true)
             resumeRestartWaiters()
             refreshState()

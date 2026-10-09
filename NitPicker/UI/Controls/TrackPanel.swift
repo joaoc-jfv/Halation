@@ -76,7 +76,7 @@ struct TrackPanel: View {
                 OpenPanel.chooseSubtitleFile { player.addSubtitleFile($0) }
             }
             if player.subtitles.sidecarAccess == .needsFolderAccess {
-                panelButton("Find Subtitles in This Folder…", symbol: "folder") {
+                panelButton("Find Subtitles and Episodes in This Folder…", symbol: "folder") {
                     player.requestSidecarFolderAccess()
                 }
             }

@@ -36,6 +36,11 @@ final class PlayerModel {
     private(set) var isPictureInPictureActive = false
     private(set) var isHDRPlaybackEligible = false
     private(set) var showsInfoPanel = false
+    /// The videos next to the open file, when the folder can be read.
+    private(set) var playlist: FolderPlaylist?
+    /// The next episode, offered during the last seconds of an episode.
+    private(set) var upNext: UpNext?
+    private(set) var autoplaysNextEpisode: Bool
     /// The open file plays on libmpv (see `PlaybackEngine.isCompatibilityEngine`).
     private(set) var isCompatibilityEngine = false
     /// The engine draws subtitles itself (mpv), so the delay and the lift above the controls go to it.
@@ -97,6 +102,11 @@ final class PlayerModel {
     @ObservationIgnored private var openTask: Task<Void, Never>?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private var scopedURL: URL?
+    @ObservationIgnored private var folderScope: URL?
+    @ObservationIgnored private var dismissedUpNext: URL?
+    @ObservationIgnored private var playlistTask: Task<Void, Never>?
+    /// How long before the end the "Up next" card shows.
+    @ObservationIgnored var upNextLeadTime: Duration = .seconds(15)
     @ObservationIgnored private var hideTask: Task<Void, Never>?
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored private var lastActivity = ContinuousClock.now
@@ -118,6 +128,7 @@ final class PlayerModel {
         self.compatibilityFactory = compatibilityFactory
         subtitles = SubtitleTrackStore(preferences: services.preferences, folderAccess: services.folderAccess)
         audioOutputMode = services.preferences.audioOutputMode
+        autoplaysNextEpisode = services.preferences.autoplaysNextEpisode
         services.nowPlaying.handlers = NowPlayingHandlers(
             play: { [weak self] in self?.play() },
             pause: { [weak self] in self?.pause() },
@@ -151,6 +162,8 @@ final class PlayerModel {
         currentURL = url
         state = .loading
         if url.startAccessingSecurityScopedResource() { scopedURL = url }
+        // Held while the file is open, so the folder can be listed and the next file opened.
+        folderScope = folderAccess.beginAccess(toFolderContaining: url)
 
         do {
             var engine = try (compatibility || preferences.forcesCompatibilityEngine) ? compatibilityFactory(url) : engineFactory(url)
@@ -248,6 +261,12 @@ final class PlayerModel {
         videoLayout = VideoLayout()
         scopedURL?.stopAccessingSecurityScopedResource()
         scopedURL = nil
+        folderScope?.stopAccessingSecurityScopedResource()
+        folderScope = nil
+        playlistTask?.cancel()
+        playlist = nil
+        upNext = nil
+        dismissedUpNext = nil
         state = .idle
         cancelHideTimer()
         controlsVisible = true
@@ -270,10 +289,12 @@ final class PlayerModel {
             registerActivity()
             services.sleep.setActive(newState == .playing)
             if newState == .paused || newState == .ended { saveResumePosition() }
+            if newState == .ended { playNextEpisodeIfDue() }
             publishNowPlaying()
         case .timeChanged(let time):
             currentTime = time
             saveResumePositionIfDue()
+            updateUpNext()
         case .durationChanged(let newDuration):
             duration = newDuration
             publishNowPlaying()
@@ -655,6 +676,7 @@ final class PlayerModel {
     private func loadSidecarSubtitles(for url: URL) {
         sidecarTask?.cancel()
         sidecarTask = Task {
+            loadPlaylist(for: url)
             await subtitles.discover(for: url, enginePaintsSubtitles: enginePaintsSubtitles)
             guard !Task.isCancelled, currentURL == url else { return }
             addNativeSidecars(for: url)
@@ -773,6 +795,16 @@ final class PlayerModel {
     }
 }
 
+/// The card that offers the next episode near the end of this one.
+struct UpNext: Equatable {
+    var url: URL
+    /// `S02E06`, when the name has one.
+    var label: String?
+    var name: String
+    /// Whether it starts on its own when this episode ends.
+    var startsAutomatically: Bool
+}
+
 /// The thumbnail and time shown above the scrubber while the pointer is on it.
 struct ScrubPreview {
     var fraction: Double
@@ -784,4 +816,85 @@ enum PlayerPanel: Equatable {
     case audioSubtitles
     case crop
     case speed
+}
+
+// MARK: Folder playlist and "Up next"
+
+/// Next and previous file in the folder, and "Up next" for episodes (PLAN.md phase 4).
+extension PlayerModel {
+    var hasNextFile: Bool { playlist?.next != nil }
+    var hasPreviousFile: Bool { playlist?.previous != nil }
+
+    func setAutoplaysNextEpisode(_ enabled: Bool) {
+        autoplaysNextEpisode = enabled
+        preferences.autoplaysNextEpisode = enabled
+        updateUpNext()
+    }
+
+    /// Lists the open file's folder. Without folder access (the sandbox only lets the app see the file itself) there is no playlist,
+    /// and the track panel offers to grant it.
+    func loadPlaylist(for url: URL) {
+        playlistTask?.cancel()
+        if folderScope == nil { folderScope = folderAccess.beginAccess(toFolderContaining: url) }
+        playlistTask = Task {
+            let siblings = await Task.detached(priority: .userInitiated) {
+                try? FileManager.default.contentsOfDirectory(at: url.deletingLastPathComponent(), includingPropertiesForKeys: nil)
+            }.value
+            guard !Task.isCancelled, currentURL == url else { return }
+            playlist = siblings.flatMap { FolderPlaylist(current: url, siblings: $0) }
+            updateUpNext()
+        }
+    }
+
+    func playNextFile() {
+        registerActivity()
+        guard let next = playlist?.next else {
+            showToast("This is the last video in the folder", symbol: "forward.end")
+            return
+        }
+        open(next)
+    }
+
+    func playPreviousFile() {
+        registerActivity()
+        guard let previous = playlist?.previous else {
+            showToast("This is the first video in the folder", symbol: "backward.end")
+            return
+        }
+        open(previous)
+    }
+
+    /// The "Play Now" button on the card.
+    func playUpNext() {
+        guard let upNext else { return }
+        open(upNext.url)
+    }
+
+    /// The card's close button: this episode will not hand over to the next one by itself.
+    func dismissUpNext() {
+        dismissedUpNext = currentURL
+        upNext = nil
+    }
+
+    func updateUpNext() {
+        let candidate = upNextCandidate()
+        if candidate != upNext { upNext = candidate }
+    }
+
+    private func upNextCandidate() -> UpNext? {
+        guard let next = playlist?.nextEpisode, let current = currentURL, dismissedUpNext != current,
+              duration > .seconds(60), duration - currentTime <= upNextLeadTime, state == .playing || state == .paused
+        else { return nil }
+        let name = next.deletingPathExtension().lastPathComponent
+        return UpNext(
+            url: next, label: EpisodeNumber.parse(fileName: next.lastPathComponent)?.label, name: name,
+            startsAutomatically: autoplaysNextEpisode
+        )
+    }
+
+    /// At the end of an episode the next one follows, unless the user turned that off or closed the card.
+    func playNextEpisodeIfDue() {
+        guard autoplaysNextEpisode, dismissedUpNext != currentURL, let next = playlist?.nextEpisode else { return }
+        open(next)
+    }
 }

@@ -11,6 +11,7 @@ final class Preferences {
         static let subtitleBackground = "subtitleBackground"
         static let subtitleOffset = "subtitleOffset"
         static let forcesCompatibilityEngine = "forceCompatibilityEngine"
+        static let autoplaysNextEpisode = "autoplayNextEpisode"
     }
 
     private static let offValue = "off"
@@ -45,6 +46,12 @@ final class Preferences {
     var audioOutputMode: AudioOutputMode {
         get { defaults.string(forKey: Key.audioOutputMode) == "stereo" ? .stereo : .spatial }
         set { defaults.set(newValue == .stereo ? "stereo" : "spatial", forKey: Key.audioOutputMode) }
+    }
+
+    /// Whether the next episode starts by itself when one ends. On unless the user turns it off.
+    var autoplaysNextEpisode: Bool {
+        get { defaults.object(forKey: Key.autoplaysNextEpisode) as? Bool ?? true }
+        set { defaults.set(newValue, forKey: Key.autoplaysNextEpisode) }
     }
 
     /// Hidden switch (`defaults write com.joaocadide.nitpicker forceCompatibilityEngine -bool YES`): play every file with libmpv.

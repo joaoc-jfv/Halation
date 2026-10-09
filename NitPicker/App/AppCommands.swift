@@ -66,6 +66,13 @@ struct AppCommands: Commands {
                 }
                 .disabled(player.chapters.isEmpty)
                 Divider()
+                Button("Next Video in Folder") { player.playNextFile() }
+                    .keyboardShortcut("]", modifiers: .command)
+                    .disabled(!player.hasNextFile)
+                Button("Previous Video in Folder") { player.playPreviousFile() }
+                    .keyboardShortcut("[", modifiers: .command)
+                    .disabled(!player.hasPreviousFile)
+                Divider()
                 Button("Previous Frame") { player.stepFrameByShortcut(forward: false) }
                     .keyboardShortcut(",", modifiers: [])
                 Button("Next Frame") { player.stepFrameByShortcut(forward: true) }

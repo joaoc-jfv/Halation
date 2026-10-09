@@ -34,6 +34,13 @@ struct PlayerWindowView: View {
                 }
                 controls
             }
+            if let upNext = player.upNext, showsControls {
+                UpNextView(upNext: upNext)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+                    .padding(.trailing, 24)
+                    .padding(.bottom, player.controlsVisible ? 110 : 28)
+                    .transition(.opacity)
+            }
             if player.isBusy {
                 BusyIndicator()
             }
@@ -109,6 +116,8 @@ struct PlayerWindowView: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: player.toast)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: player.resumeOffer)
     }
+
+    // The next-episode card appears and disappears without moving, so it never animates over the mpv view.
 }
 
 /// The control bar and the panel that grows out of it, in one glass container so they morph.
