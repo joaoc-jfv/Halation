@@ -3,13 +3,13 @@
 > **Nit Picker**: a nit is the unit of display brightness, and a nit-picker is someone who fusses over small details. Renamed from the working title "Halation" (the soft glow around bright highlights on film) in October 2026.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** Phase 1 (milestones 1.1 to 1.10) is done, the phase 2 spike is done, and milestones 2.1 (FFmpeg, `MKVProbe`, loopback server), 2.2 (`RemuxEngine`) and 2.3 (MKV tracks and thumbnails) and 2.4 (audio conversion, files without Cues) and 3.1 (libmpv groundwork and the compatibility engine) are done. Phase 1: Nit Picker plays MP4, MOV and M4V with everything in §5 and §6. MKV and the other containers are phases 2 and 3 (opening one shows "This format isn't supported yet.").
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** every milestone in §7 is built: phase 1 (1.1–1.10), phase 2 (2.1–2.4), phase 3 (3.1–3.3) and phase 4 (4.1–4.5). What is left is in §0 ("What is left"): things only the owner can do (signing, accounts, keys), things nobody could check without a person or a real file, and a few small ideas. MP4, MOV and M4V play through AVFoundation; MKV and WebM are remuxed on the fly into HLS for AVFoundation; everything else plays in libmpv ("compatibility mode").
 
 ---
 
 ## 0. Where things stand (read this first)
 
-*Written at the end of milestone 3.1 so work can continue from a fresh chat. Everything below is also true in the code and tests; the rest of this file is the design.*
+*Written at the end of milestone 4.5 so work can continue from a fresh chat. Everything below is also true in the code and tests; the rest of this file is the design.*
 
 ### State
 
@@ -25,29 +25,36 @@ This document is the full build plan. It is written so that an engineer (or anot
 | 3.1 libmpv groundwork, `MPVEngine`, fallback routing | **Done** (see 3.1 notes). |
 | 3.2 mpv polish: subtitles, thumbnails, Dolby Vision note | **Done** (see 3.2 notes). |
 | 3.3 real-file checks, compatibility switch, resize fix | **Done** (see 3.3 notes). |
-| **Phase 4 (next)** | Not started. Details in §7. |
-| Phase 4 | Not started. |
+| 4.1 folder playlists, 4.2 black bars, 4.3 picture adjustments, 4.4 screenshots, 4.5 DMG script | **Done** (see the notes under §7 Phase 4). |
 
-347 tests pass at the end of 3.3 (`xcodebuild … test`). The Release app is 93 MB (universal binary; before libmpv it was 41 MB). One commit per milestone; `git log` is the history.
+387 tests pass (`xcodebuild … test`). The Release app is 94 MB (universal binary; before libmpv it was 41 MB) and the disk image 43 MB. One commit per milestone; `git log` is the history.
 
 ### To start a session
 1. Read `CLAUDE.md`, this section, §7 Phase 2, and `Spikes/MKVRemux/README.md`.
 2. `xcodegen generate && xcodebuild -scheme NitPicker -destination 'platform=macOS' test`. The first build downloads the FFmpeg binaries (~100 MB).
 3. `TestMedia/` (gitignored, never commit) holds one real file for manual checks: a 3840×1920 HEVC Dolby Vision profile 8.1 MKV, 55 minutes, 10.6 GB, two E-AC-3 5.1 JOC audio tracks (Italian first and default, then English), and 46 SRT subtitle tracks (including Forced and SDH). Open it with `open -a <built NitPicker.app> <file>`.
 
-### Next: milestone 3.2 (the compatibility engine, finished)
-`MPVEngine` plays and is routed to (3.1). What it still lacks, in order:
-- **Subtitles.** mpv draws subtitles itself (`sub-visibility`), so ASS styling and PGS/VobSub show, but: the model's `drawsSubtitles` is false for mpv tracks, so **Z/X delay does nothing for them** (map to `sub-delay`), the subtitle style preferences (size, background, position) aren't applied to mpv (`sub-font-size`, `sub-back-color`, `sub-pos`...), and sidecar files are the app's own overlay (fine, but libass could do them: `sub-add`). Remembered language/forced rules already work through `TrackSelectionPolicy`, since the engine lists tracks as `MediaTrack`s.
-- **Audio.** Stereo mode sets `audio-channels=stereo`; Spatial mode lets mpv's `coreaudio` output carry the file's own layout and the tracks are never flagged `isSpatial`, so no Spatial Audio badge and no system spatialization. mpv 0.41 has `--ao=avfoundation` (AVSampleBufferAudioRenderer), which may allow `allowedAudioSpatializationFormats`; untested. DTS-HD and TrueHD decode in libavcodec as multichannel PCM.
-- **Thumbnails** (scrub previews, posters, Now Playing artwork): `thumbnail` returns nil, so previews show only the time. mpv's `screenshot-raw` only gives the current frame; a second decode path (libavcodec/VideoToolbox from `FFmpegKit`) is the likely answer.
-- **Crop/aspect** work (the view is sized inside the clipping container, `keepaspect` for overrides), but only checked on a still pattern; Picture in Picture is unavailable (the button is hidden).
-- **Dolby Vision** shows as tone-mapped HDR10 (`MPVMapping.hdr` can't see the profile); resume/Now Playing/chapters go through the model unchanged but chapters were not exercised on a real file.
-- Then: tests with real legacy files (VP9, DTS, ASS, PGS — none could be generated), a CPU/memory check of the mpv path on the real 4K file, and the phase 2 hardening list (AV1, big files without Cues, converted audio on a real file, HDR10+).
+### What is left
+**Needs the owner (accounts, keys, a decision):**
+- **Signing and notarizing a release.** `scripts/make-dmg.sh` builds the Release app and the disk image and, given a *Developer ID Application* identity and a `notarytool` keychain profile, signs, notarizes and staples it (see 4.5 notes). This Mac only has an Apple Development identity, so that path has not been run.
+- **Updates (Sparkle)**, the **website**, and **subtitle downloads** (OpenSubtitles needs an API key and consent screens): each needs an account or key the owner has to create and a hosting decision. Nothing was added for them, because code that points nowhere can't be verified.
+- The **name check** (§9 item 6).
+
+**Needs a person or a real file:**
+- Dolby Vision actually switching the display into DV mode, how the JOC track sounds on AirPods, how HDR looks on screen and how the HDR screenshot looks in Photos on an HDR display.
+- Real VP9, DTS, TrueHD, PGS/VobSub, AVI and AV1 files on the mpv engine (this FFmpeg build has no encoder for them, and none is in `TestMedia/`): those paths are libavcodec's decoders and libass, and were exercised only with MPEG-4, ASS, SRT and PCM that tests can generate.
+- The sandbox's folder-access dialog (used by sidecar subtitles and folder playlists) end to end; only its failure path and a folder inside the app's own container were exercised.
+- Phase 2 hardening on real files: big MKVs without Cues, converted (DTS/TrueHD) audio, HDR10+.
+
+**Known limits and small ideas:**
+- mpv tracks never get the Spatial Audio badge or system spatialization (see the 3.2 notes for why), and Picture in Picture is unavailable on mpv. ASS subtitles drawn by mpv can sit behind the control bar while it shows.
+- HDR10+ is not detected (`HDRFormat.hdr10Plus` exists but nothing sets it): it is signalled in the bitstream, so it needs a decoded frame's side data.
+- No visible playlist or queue (Next/Previous walk the folder), no shuffle.
+- CPU of the Release app playing the real 4K Dolby Vision file through the remuxer, measured with `top` in 4.5: 17–23% of a core and 500–600 MB; the pre-3.2 build measures the same, so nothing regressed. The 8–10% in the 2.2 notes came from a different measurement (`ps`), which averages over the whole life of the process.
 
 ### Known gaps and things not verified
 - **Not verified by eye or ear (needs a person):** Dolby Vision actually switching the display into DV mode; how the JOC track sounds on AirPods; HDR brightness on screen. The data path (tags, sample entries, flags, pixel format) is verified.
 - Not verified by ear: that switching audio sounds right on AirPods (the owner reports Spatial Audio works). Not measured: how long the one-pass subtitle scan takes on a cold disk for the 10.6 GB file (subtitles were showing within seconds in the real app), and ASS styling beyond plain text (phase 3). Bitmap subtitles (PGS, VobSub) aren't read.
-- The sandbox's folder-access prompt for sidecar subtitles couldn't be exercised end to end (only its failure path is tested).
 - `NitPicker.app` is signed ad hoc, so Hardened Runtime is off; real signing, notarization and Sparkle are phase 4.
 
 ### Decisions that belong to the owner
@@ -435,7 +442,7 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 | 4.2 | Auto black-bar crop detection | **Done** (see 4.2 notes) |
 | 4.3 | Video adjustments (brightness, contrast, saturation) on the mpv engine | **Done** (see 4.3 notes) |
 | 4.4 | Screenshots (⌘⇧S), HDR HEIC when the source is HDR | **Done** (see 4.4 notes) |
-| 4.5 | Packaging: notarized DMG script. Sparkle, the website and subtitle downloads need accounts and keys that only the owner can create, so they are listed as owner tasks | Not started |
+| 4.5 | Packaging: DMG script with signing and notarization. Sparkle, the website and subtitle downloads need accounts and keys that only the owner can create, so they are listed as owner tasks | **Done** (see 4.5 notes) |
 
 4.1 notes (done; the card and the hand-over checked in the real app with two generated episodes in the app's own container, where the sandbox allows listing a folder):
 - `FolderPlaylist` lists the videos next to the open file (by extension, hidden files skipped) in Finder's name order (`localizedStandardCompare`, so `E2` comes before `E10`). `EpisodeNumber.parse` reads `S01E02`, `1x02`, `EP05`/`Episode 5` and fansub-style ` - 05 [1080p]`; the series is the name before the marker, lowercased with punctuation squeezed out. `nextEpisode` is the next file only when it has the same series and a later number, so a movie or another show after the last episode never starts by itself, while Next/Previous still walk any folder.
@@ -454,7 +461,12 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 - **AVFoundation** (and the remux engine through it): an `AVPlayerItemVideoOutput` is attached only for the moment of the capture (a player that is paused needs the same moment shown again, by a zero-tolerance seek, before a new output gets a frame). A buffer tagged PQ or HLG stays a pixel buffer and is written as **10-bit HEIC** in the matching BT.2100 colour space with Core Image (`heif10Representation`); anything else becomes a PNG. Core Image is used for stills only, never in the playback path. On the real 4K Dolby Vision 8.1 file the HEIC came out 3840×1920, 10 bits, profile "Rec. ITU-R BT.2100 PQ".
 - **mpv**: `screenshot-raw` (this FFmpeg has no image encoders) gives the frame as mpv shows it, tone-mapped for HDR, saved as PNG. Taken off the main actor.
 - Not verified: how the HEIC looks in Photos on an HDR display (a person must look); HLG files (the transfer is read from the buffer's tags, only PQ was exercised); Dolby Vision profile 5, whose buffers may not be plain PQ.
-- Remaining Phase 4 ideas, as written originally: subtitle downloads (OpenSubtitles API; needs an API key and consent screens), Sparkle updates, notarized DMG, website.
+4.5 notes (done as far as this Mac allows):
+- `scripts/make-dmg.sh` runs `xcodegen`, builds the Release app into `build/DerivedData`, verifies its signature, makes `build/NitPicker-<version>.dmg` (the app and an Applications link, compressed) and, with `--identity "Developer ID Application: …" --team ID` signs with a timestamp and the hardened runtime, and with `--notary-profile name` submits to Apple, waits, staples and checks with `spctl`. Run without options it signs as Xcode would here (ad hoc, hardened runtime flag set), which is for trying, not for sharing.
+- **Run here:** the unsigned path end to end. The Release app builds, `codesign --verify --deep --strict` passes, the image mounts, holds a universal (arm64 + x86_64) 94 MB app, and the Release build launches and plays the real 4K file. **Not run:** the Developer ID signing and the notarization (no such identity or profile here), so the first real release should be done by hand once with the script's output watched; embedded frameworks (MPVKit's `Lib*` frameworks are copied into the app) must all be signed with the same identity, which Xcode does when it embeds them.
+- Not built, because each needs something only the owner can create: subtitle downloads (OpenSubtitles API: an API key and consent screens), Sparkle updates (an EdDSA key and a place to host the appcast), the website.
+
+---
 
 ## 8. Testing strategy
 
