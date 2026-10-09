@@ -31,6 +31,10 @@ enum TestVideo {
                 AVVideoProfileLevelKey: kVTProfileLevel_HEVC_Main10_AutoLevel as String,
             ]
         }
+        // A keyframe every second, so the container index has several entries to read.
+        var keyframes = settings[AVVideoCompressionPropertiesKey] as? [String: Any] ?? [:]
+        keyframes[AVVideoMaxKeyFrameIntervalKey] = fps
+        settings[AVVideoCompressionPropertiesKey] = keyframes
         if let pixelAspectRatio {
             var compression = settings[AVVideoCompressionPropertiesKey] as? [String: Any] ?? [:]
             compression[AVVideoPixelAspectRatioKey] = [

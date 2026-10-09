@@ -10,6 +10,9 @@ settings:
     SWIFT_STRICT_CONCURRENCY: complete
     MARKETING_VERSION: "0.1.0"
     CURRENT_PROJECT_VERSION: "1"
+packages:
+  FFmpegKit:
+    path: Packages/FFmpegKit
 targets:
   Halation:
     type: application
@@ -18,6 +21,8 @@ targets:
       - path: Halation
         excludes:
           - Resources/Info.plist
+    dependencies:
+      - package: FFmpegKit
     info:
       path: Halation/Resources/Info.plist
       properties:
@@ -59,6 +64,10 @@ targets:
         com.apple.security.app-sandbox: true
         com.apple.security.files.user-selected.read-only: true
         com.apple.security.files.bookmarks.app-scope: true
+        # Phase 2's loopback HLS server. Verified in the sandboxed test host: without `server` the listener is
+        # denied, and without `client` AVPlayer can't reach it (playback never starts).
+        com.apple.security.network.server: true
+        com.apple.security.network.client: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joaocadide.halation
@@ -77,6 +86,7 @@ targets:
       - HalationTests
     dependencies:
       - target: Halation
+      - package: FFmpegKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.joaocadide.halation.tests

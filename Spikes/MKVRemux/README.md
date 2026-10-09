@@ -53,8 +53,8 @@ Test file: 2160p-class HEVC 3840×1920 Dolby Vision profile 8.1 + two E-AC-3 5.1
 - Copy stream metadata (language, title) so the audio tracks keep their languages.
 
 **Still open** (not covered by the spike)
-- Whether the loopback listener and AVPlayer's connection to it work in the **sandbox** with `network.server` +
-  `network.client` (this Mac's sandbox didn't restrict file reads, so a test here wouldn't prove it).
+- ~~Whether the loopback listener and AVPlayer's connection to it work in the **sandbox**~~ Settled in milestone 2.1: the
+  sandbox is enforced for network here, and both `network.server` and `network.client` are needed.
 - Dolby Vision actually engaging on a DV-capable display, and how the Atmos/JOC audio sounds on AirPods.
 - Subtitles (46 SRT tracks here), audio tracks that AVPlayer can't play (DTS, TrueHD), AV1/VP9, files without Cues.
 - Matroska timestamps have 1 ms resolution, so video sample durations jitter 41–42 ms; fine, but worth regularising.

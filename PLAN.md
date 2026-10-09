@@ -3,7 +3,7 @@
 > **Halation** (n.): the soft glow that forms around bright highlights on film.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** Phase 1 (milestones 1.1 to 1.10) is done: Halation plays MP4, MOV and M4V with everything in §5 and §6. MKV and the other containers are phases 2 and 3 (opening one shows "This format isn't supported yet.").
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** Phase 1 (milestones 1.1 to 1.10) is done, the phase 2 spike is done, and milestone 2.1 (FFmpeg, `MKVProbe`, loopback server) is done. Phase 1: Halation plays MP4, MOV and M4V with everything in §5 and §6. MKV and the other containers are phases 2 and 3 (opening one shows "This format isn't supported yet.").
 
 ---
 
@@ -124,7 +124,7 @@ Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/faile
 - **Dependencies:**
   - Phase 1: none (Apple frameworks only: AVFoundation, AVKit, CoreMedia, MediaPlayer, SwiftUI, AppKit).
   - Phase 2+: FFmpeg libraries (libavformat/libavcodec/libavutil) and later libmpv + libass. Preferred source: **MPVKit** (Swift package shipping libmpv, FFmpeg, and libass as xcframeworks). Pick its **LGPL** variant unless we decide to open-source under GPL. *Verify the current package name, maintenance status, and license variants before adding it.*
-- **Entitlements:** defined under `entitlements.properties` in `project.yml` (XcodeGen rewrites the `.entitlements` file from them, so editing the file by hand is lost; until 1.6 it had been regenerated empty and the app ran unsandboxed). App Sandbox; `com.apple.security.files.user-selected.read-only`; `com.apple.security.files.bookmarks.app-scope` (resume and recents across launches via security-scoped bookmarks). Hardened Runtime is enabled in build settings, but Xcode turns it off while signing ad hoc (`CODE_SIGN_IDENTITY: "-"`, used so the project builds without a team). Set a real signing identity for release builds. Phase 2 needs a loopback HTTP server (the spike showed `AVAssetResourceLoader` cannot serve HLS media), so add `com.apple.security.network.server` and `com.apple.security.network.client`, and check in the sandbox that AVPlayer can reach the loopback listener.
+- **Entitlements:** defined under `entitlements.properties` in `project.yml` (XcodeGen rewrites the `.entitlements` file from them, so editing the file by hand is lost; until 1.6 it had been regenerated empty and the app ran unsandboxed). App Sandbox; `com.apple.security.files.user-selected.read-only`; `com.apple.security.files.bookmarks.app-scope` (resume and recents across launches via security-scoped bookmarks). Hardened Runtime is enabled in build settings, but Xcode turns it off while signing ad hoc (`CODE_SIGN_IDENTITY: "-"`, used so the project builds without a team). Set a real signing identity for release builds. Phase 2 needs a loopback HTTP server (the spike showed `AVAssetResourceLoader` cannot serve HLS media), so the app has `com.apple.security.network.server` and `com.apple.security.network.client`. Both are required, as verified in the sandboxed test host (listening is denied without `server`; AVPlayer cannot reach the listener without `client`).
 - **Distribution (later):** Developer ID + notarization, Sparkle for updates, GitHub Releases. App Store optional; the sandbox setup above keeps that open.
 
 ### Folder layout
@@ -141,7 +141,7 @@ Halation/
 │   ├── Engine/
 │   │   ├── PlaybackEngine.swift, PlaybackTypes.swift, EngineRouter.swift
 │   │   ├── AVFoundation/   AVFoundationEngine.swift, AVTrackMapping.swift, PlayerLayerView.swift, PiPController.swift
-│   │   ├── Remux/          (phase 2)
+│   │   ├── Remux/          MKVProbe.swift, LoopbackServer.swift, FFmpegInfo.swift (phase 2; RemuxEngine comes in 2.2)
 │   │   └── MPV/            (phase 3)
 │   ├── Media/          CodecNames.swift, ColorDescription.swift, MediaBadges.swift, InfoSections.swift, LanguageMatching.swift, MediaProbe.swift, HDRDetection.swift, AudioFormatDetection.swift
 │   ├── Player/         PlayerModel.swift, PlayerModel+Shortcuts.swift, ChapterNavigation.swift, VideoLayout.swift, VideoGeometry.swift, TrackSelectionPolicy.swift, MediaTrack+Labels.swift, PlaybackSpeed.swift, Toast.swift, TimeFormatting.swift
@@ -289,6 +289,19 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 | 1.10 | **Polish pass**: accessibility, Reduce Transparency, error states, app icon | Ready for daily use with MP4/MOV |
 
 ### Phase 2 — MKV via remuxing
+
+| # | Milestone | Done when |
+|---|---|---|
+| 2.1 | **Groundwork**: FFmpeg as a dependency (`Packages/FFmpegKit`), `MKVProbe` (tracks, HDR/DV, chapters, keyframe index), the production `LoopbackServer`, sandbox entitlements | The sandboxed app links FFmpeg, probes generated MKVs in tests, and AVPlayer plays a file it fetches from the loopback server. **Done.** |
+| 2.2 | **`RemuxEngine`**: playlists from the keyframe index, per-segment muxing with the `tfdt` rewrite, shared init, HLS served by the loopback server, `EngineRouter` sends MKV there | A real HEVC + E-AC-3 MKV plays in the app with HDR/DV, Spatial Audio, instant seeking |
+| 2.3 | **Tracks**: audio track switching, text subtitles extracted into the existing overlay, chapters from the file, `MediaInfo`/HUD for MKV | Switching audio and subtitles works on a multi-track MKV |
+| 2.4 | **Audio fallback and hardening**: tracks AVPlayer can't play, files without Cues, error states, CPU and memory check | A typical MKV plays with under ~10% CPU; odd files fail with a clear message |
+
+2.1 notes:
+- `Packages/FFmpegKit` is a local package of MPVKit's prebuilt FFmpeg n9 **LGPL** static frameworks (avcodec, avformat, avutil, swresample), pinned by checksum, about 75 MB to download (against 1.7 GB for all of MPVKit). The static archives also reference gmp, gnutls, nettle, hogweed, dav1d, uavs3d and lcms2 (RTMP, TLS, AV1, colour management), so those binaries are pinned too and linked explicitly with `linkedFramework`, because nothing imports them. Updating FFmpeg means taking the new URLs and checksums from MPVKit's `Package.swift`.
+- `MKVProbe` reports the keyframe index only when it reaches near the end of the file (`isCompleteIndex`). libavformat parses the Cues lazily, on the first seek, and probing alone can leave a partial index that must not be mistaken for the real one.
+- `LoopbackServer`: IPv4 loopback only, random port, a random token as the first path component, GET/HEAD, single ranges, keep-alive. **Verified in the sandboxed test host: AVPlayer needs both `network.server` and `network.client`** (without `client` playback never starts).
+- Not measured yet: the release binary size with FFmpeg linked in (the linker strips it until the engine calls it).
 - **Spike done** (`Spikes/MKVRemux/`, see its README): the approach below works on a real 4K Dolby Vision 8.1 + E-AC-3 JOC MKV, with two changes to the original plan. The transport is a **loopback HTTP server**, because `AVAssetResourceLoader` cannot feed HLS media (`-12881`). And every segment is cut by seeking and **using a fresh muxer, then rewriting `tfdt`**, with one init shared by all segments.
 - Add FFmpeg libraries. The spike used MPVKit `1.1.0-n9.0.2` (FFmpeg n9, LGPL, static). Its README says it is "only suitable for learning" and "will not be maintained too frequently" (it did ship a release on 2026-10-07). Options for the real build: depend on MPVKit's FFmpeg binary targets only (Libavformat, Libavcodec, Libavutil, pinned by checksum), or depend on AetherEngine, which already implements this whole architecture (LGPL-3.0 with an App Store exception) and could be used as a dependency or as a reference.
 - `MKVProbe`: read tracks, codecs, cues (keyframe index), chapters, and attachments with libavformat.
@@ -345,7 +358,7 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 
 ## 9. Risks and open questions
 
-1. **MKV → HLS remuxing (phase 2)**: the spike is done and the approach is confirmed for HEVC + Dolby Vision + E-AC-3 JOC (`Spikes/MKVRemux/README.md`). Still open: sandbox behaviour of the loopback server, Dolby Vision on a DV display, subtitles and audio fallbacks, files without Cues.
+1. **MKV → HLS remuxing (phase 2)**: the spike is done and the approach is confirmed for HEVC + Dolby Vision + E-AC-3 JOC (`Spikes/MKVRemux/README.md`). Sandbox behaviour of the loopback server is settled (2.1). Still open: Dolby Vision on a DV display, subtitles and audio fallbacks, files without Cues.
 2. **E-AC-3 JOC detection API:** no media characteristic exists, so the `dec3` parser (milestone 1.5) is the approach. Confirm it against a real JOC file and see which of the sample description atom or the magic cookie CoreMedia fills.
 3. **Audio fallback codec inside fMP4 HLS** for TrueHD/DTS: test which multichannel formats AVPlayer accepts.
 4. **MPVKit** packaging and licensing: an LGPL build exists (the plain `MPVKit` product, FFmpeg n9, static) and it released recently, but its README disclaims regular maintenance and points to AetherEngine for production. **Static LGPL linking** also means users must be able to relink the app with another FFmpeg, which is simplest if Halation is open source (see 7).
