@@ -432,7 +432,7 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 | # | Milestone | State |
 |---|---|---|
 | 4.1 | **Folder playlists**, next/previous episode detection (`S01E02`), "Up next" | **Done** (see 4.1 notes) |
-| 4.2 | Auto black-bar crop detection | Not started |
+| 4.2 | Auto black-bar crop detection | **Done** (see 4.2 notes) |
 | 4.3 | Video adjustments (brightness, contrast, saturation) on the mpv engine | Not started |
 | 4.4 | Screenshots (⌘⇧S), HDR HEIC when the source is HDR | Not started |
 | 4.5 | Packaging: notarized DMG script. Sparkle, the website and subtitle downloads need accounts and keys that only the owner can create, so they are listed as owner tasks | Not started |
@@ -442,6 +442,10 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 - **Sandbox.** The app can only list a folder the user has allowed. The same permission as for sidecar subtitles is used (the track panel button now reads "Find Subtitles and Episodes in This Folder…"); `PlayerModel` holds the folder's security scope while a file is open, so the next file opens. Without it there is no playlist and the menu items stay disabled. The real-app check used the container's own temp folder; the permission dialog was not exercised.
 - **UI.** Playback ▸ Next/Previous Video in Folder (⌘] and ⌘[). Over the last 15 s of an episode a glass card shows "Up next · starts when this ends", the episode (`S01E02` and the file name), Play Now and a close button that stops the hand-over for that file; at the end the next episode starts. The card never animates (no countdown), because an animating SwiftUI view over the mpv view was the first suspect for the black-window bug. Settings (⌘,) now has Playback and Subtitles tabs; "Play the next episode automatically" is on by default; with it off the card still offers the episode but nothing starts alone.
 - Not done: playing a folder as a queue with a visible list, shuffle, "Next" for files in other folders.
+4.2 notes (done):
+- `BlackBarDetector` (pure) reads ten stills the engine gives through `thumbnail(at:maxSize:)` (at 5% to 86% of the file), so it works on every engine and needs no `AVPlayerItemVideoOutput`. A row or column is picture when more than 2% of its pixels are brighter than luma 28; a still with under 4% picture (a fade) is ignored; the bars are the smallest each side shows in any still (so a dark scene only makes it more cautious), at least four usable stills are needed, and bars under 2% are not cropped. The crop is centred, so only the thinner bar of a pair counts. The result is a ratio (`VideoLayout.detectedCrop`), applied by `VideoGeometry` like the presets, so it is still just frame sizing and HDR is untouched; choosing a preset or Reset clears it.
+- Video ▸ Detect Black Bars (⇧C) and a row in the crop panel always answer with a toast ("Cropped black bars: 2.39:1" or "No black bars found"). Settings ▸ Playback ▸ "Crop black bars when a file opens" (off by default) runs it 1.5 s after opening and only speaks when it crops.
+- Verified on a generated letterboxed MP4 through the real AVFoundation engine (2.39:1 found within 0.2) and on synthetic stills; not on a real letterboxed film (none in `TestMedia/`). HDR and mpv stills come out tone-mapped or dull, which doesn't matter for finding black.
 - Remaining Phase 4 ideas, as written originally: subtitle downloads (OpenSubtitles API; needs an API key and consent screens), Sparkle updates, notarized DMG, website.
 
 ## 8. Testing strategy

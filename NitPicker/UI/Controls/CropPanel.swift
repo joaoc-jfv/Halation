@@ -20,9 +20,15 @@ struct CropPanel: View {
                 VStack(alignment: .leading, spacing: 4) {
                     panelHeading("Crop")
                     ForEach(VideoLayout.Crop.allCases, id: \.self) { crop in
-                        PanelRow(title: crop.label, isSelected: player.videoLayout.crop == crop) {
+                        PanelRow(title: crop.label, isSelected: player.videoLayout.crop == crop && player.videoLayout.detectedCrop == nil) {
                             player.setCrop(crop)
                         }
+                    }
+                    if let detected = player.videoLayout.detectedCrop {
+                        PanelRow(title: "Detected \(VideoLayout.label(forRatio: detected))", isSelected: true) {}
+                    }
+                    PanelRow(title: player.isDetectingBlackBars ? "Looking…" : "Detect Black Bars", isSelected: false) {
+                        player.detectBlackBars()
                     }
                     Text("Press C to cycle.")
                         .font(.caption)

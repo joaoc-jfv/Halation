@@ -77,7 +77,15 @@ struct VideoLayout: Equatable, Sendable {
 
     var aspect: Aspect = .auto
     var crop: Crop = .none
+    /// A crop to the ratio that black-bar detection found, instead of a preset. Choosing a preset clears it.
+    var detectedCrop: CGFloat?
     var zoom: Zoom = .fit
+
+    /// The ratio of the centred region that stays visible, if any.
+    var cropRatio: CGFloat? { detectedCrop ?? crop.ratio }
+
+    /// `2.35:1`, for a toast or a row.
+    static func label(forRatio ratio: CGFloat) -> String { String(format: "%.2f:1", Double(ratio)) }
 
     var isDefault: Bool { self == VideoLayout() }
 }

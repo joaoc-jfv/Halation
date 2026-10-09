@@ -92,10 +92,13 @@ struct AppCommands: Commands {
             Group {
                 Button("Next Crop Preset") { player.cycleCropByShortcut() }
                     .keyboardShortcut("c", modifiers: [])
+                Button("Detect Black Bars") { player.detectBlackBars() }
+                    .keyboardShortcut("c", modifiers: .shift)
+                    .disabled(player.isDetectingBlackBars)
                 Menu("Crop") {
                     ForEach(VideoLayout.Crop.allCases, id: \.self) { crop in
                         Toggle(crop.label, isOn: Binding(
-                            get: { player.videoLayout.crop == crop },
+                            get: { player.videoLayout.crop == crop && player.videoLayout.detectedCrop == nil },
                             set: { _ in player.setCrop(crop) }
                         ))
                     }

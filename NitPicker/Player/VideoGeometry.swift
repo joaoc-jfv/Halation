@@ -26,7 +26,7 @@ enum VideoGeometry {
 
         // The region of it that stays visible: the whole picture, or a centered crop.
         var region = picture
-        if let ratio = layout.crop.ratio {
+        if let ratio = layout.cropRatio {
             region = ratio >= picture.width / picture.height
                 ? CGSize(width: picture.width, height: picture.width / ratio)
                 : CGSize(width: picture.height * ratio, height: picture.height)

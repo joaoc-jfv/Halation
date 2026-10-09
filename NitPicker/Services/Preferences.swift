@@ -12,6 +12,7 @@ final class Preferences {
         static let subtitleOffset = "subtitleOffset"
         static let forcesCompatibilityEngine = "forceCompatibilityEngine"
         static let autoplaysNextEpisode = "autoplayNextEpisode"
+        static let cropsBlackBarsAutomatically = "cropBlackBarsAutomatically"
     }
 
     private static let offValue = "off"
@@ -52,6 +53,12 @@ final class Preferences {
     var autoplaysNextEpisode: Bool {
         get { defaults.object(forKey: Key.autoplaysNextEpisode) as? Bool ?? true }
         set { defaults.set(newValue, forKey: Key.autoplaysNextEpisode) }
+    }
+
+    /// Whether black bars are cropped off when a file opens. Off unless the user turns it on.
+    var cropsBlackBarsAutomatically: Bool {
+        get { defaults.bool(forKey: Key.cropsBlackBarsAutomatically) }
+        set { defaults.set(newValue, forKey: Key.cropsBlackBarsAutomatically) }
     }
 
     /// Hidden switch (`defaults write com.joaocadide.nitpicker forceCompatibilityEngine -bool YES`): play every file with libmpv.

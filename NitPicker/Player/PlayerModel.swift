@@ -41,6 +41,8 @@ final class PlayerModel {
     /// The next episode, offered during the last seconds of an episode.
     private(set) var upNext: UpNext?
     private(set) var autoplaysNextEpisode: Bool
+    private(set) var cropsBlackBarsAutomatically: Bool
+    private(set) var isDetectingBlackBars = false
     /// The open file plays on libmpv (see `PlaybackEngine.isCompatibilityEngine`).
     private(set) var isCompatibilityEngine = false
     /// The engine draws subtitles itself (mpv), so the delay and the lift above the controls go to it.
@@ -105,6 +107,7 @@ final class PlayerModel {
     @ObservationIgnored private var folderScope: URL?
     @ObservationIgnored private var dismissedUpNext: URL?
     @ObservationIgnored private var playlistTask: Task<Void, Never>?
+    @ObservationIgnored private var blackBarTask: Task<Void, Never>?
     /// How long before the end the "Up next" card shows.
     @ObservationIgnored var upNextLeadTime: Duration = .seconds(15)
     @ObservationIgnored private var hideTask: Task<Void, Never>?
@@ -129,6 +132,7 @@ final class PlayerModel {
         subtitles = SubtitleTrackStore(preferences: services.preferences, folderAccess: services.folderAccess)
         audioOutputMode = services.preferences.audioOutputMode
         autoplaysNextEpisode = services.preferences.autoplaysNextEpisode
+        cropsBlackBarsAutomatically = services.preferences.cropsBlackBarsAutomatically
         services.nowPlaying.handlers = NowPlayingHandlers(
             play: { [weak self] in self?.play() },
             pause: { [weak self] in self?.pause() },
@@ -184,6 +188,14 @@ final class PlayerModel {
             if startAt == nil { offerResume(for: url) }
             loadSidecarSubtitles(for: url)
             loadArtwork(from: engine)
+            if cropsBlackBarsAutomatically {
+                // Once the first seconds are playing and the duration is known.
+                blackBarTask = Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    guard !Task.isCancelled, currentURL == url else { return }
+                    detectBlackBars(announce: false)
+                }
+            }
         } catch is CancellationError {
             // Superseded by another open().
         } catch {
@@ -264,6 +276,8 @@ final class PlayerModel {
         folderScope?.stopAccessingSecurityScopedResource()
         folderScope = nil
         playlistTask?.cancel()
+        blackBarTask?.cancel()
+        isDetectingBlackBars = false
         playlist = nil
         upNext = nil
         dismissedUpNext = nil
@@ -553,7 +567,7 @@ final class PlayerModel {
     // MARK: Crop, aspect and zoom
 
     func setAspect(_ aspect: VideoLayout.Aspect) { updateLayout { $0.aspect = aspect } }
-    func setCrop(_ crop: VideoLayout.Crop) { updateLayout { $0.crop = crop } }
+    func setCrop(_ crop: VideoLayout.Crop) { updateLayout { $0.crop = crop; $0.detectedCrop = nil } }
     func setZoom(_ zoom: VideoLayout.Zoom) { updateLayout { $0.zoom = zoom } }
     func resetVideoLayout() { updateLayout { $0 = VideoLayout() } }
 
@@ -896,5 +910,42 @@ extension PlayerModel {
     func playNextEpisodeIfDue() {
         guard autoplaysNextEpisode, dismissedUpNext != currentURL, let next = playlist?.nextEpisode else { return }
         open(next)
+    }
+}
+
+// MARK: Black bars
+
+extension PlayerModel {
+    func setCropsBlackBarsAutomatically(_ enabled: Bool) {
+        cropsBlackBarsAutomatically = enabled
+        preferences.cropsBlackBarsAutomatically = enabled
+    }
+
+    /// Looks at stills from across the file for black bars baked into the picture and crops them off. `announce` is true for the
+    /// user's own request, which always answers with a toast; the automatic run at open only speaks when it crops.
+    func detectBlackBars(announce: Bool = true) {
+        guard let engine, duration > .zero, !isDetectingBlackBars else { return }
+        blackBarTask?.cancel()
+        isDetectingBlackBars = true
+        if announce { showToast("Looking for black bars…", symbol: "crop") }
+        let length = duration
+        let size = mediaInfo?.presentationSize ?? .zero
+        blackBarTask = Task {
+            defer { isDetectingBlackBars = false }
+            var stills: [BlackBarDetector.Bars?] = []
+            for step in 1...10 {
+                guard !Task.isCancelled else { return }
+                let at = Duration.seconds(length.seconds * (0.05 + 0.09 * Double(step - 1)))
+                let image = await engine.thumbnail(at: at, maxSize: CGSize(width: 400, height: 400))
+                stills.append(image.flatMap { BlackBarDetector.bars(in: $0) })
+            }
+            guard !Task.isCancelled else { return }
+            guard let bars = BlackBarDetector.commonBars(stills), let ratio = BlackBarDetector.cropRatio(bars: bars, displaySize: size) else {
+                if announce { showToast("No black bars found", symbol: "crop") }
+                return
+            }
+            updateLayout { $0.detectedCrop = ratio; $0.crop = .none }
+            showToast("Cropped black bars: \(VideoLayout.label(forRatio: ratio))", symbol: "crop")
+        }
     }
 }

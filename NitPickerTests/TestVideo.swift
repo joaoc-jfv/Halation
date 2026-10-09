@@ -11,7 +11,8 @@ enum TestVideo {
     ///   all in one alternate group so they show up as selectable audio options.
     static func make(
         seconds: Int = 2, fps: Int = 10, size: CGSize = CGSize(width: 320, height: 240),
-        flavor: Flavor = .sdrH264, audioLanguages: [String] = [], pixelAspectRatio: (horizontal: Int, vertical: Int)? = nil
+        flavor: Flavor = .sdrH264, audioLanguages: [String] = [], pixelAspectRatio: (horizontal: Int, vertical: Int)? = nil,
+        letterbox: Double = 0
     ) async throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("nitpicker-\(UUID().uuidString).mp4")
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
@@ -88,7 +89,16 @@ enum TestVideo {
                 CVPixelBufferCreate(nil, Int(size.width), Int(size.height), kCVPixelFormatType_32BGRA, nil, &buffer)
                 guard let buffer else { throw CocoaError(.fileWriteUnknown) }
                 CVPixelBufferLockBaseAddress(buffer, [])
-                memset(CVPixelBufferGetBaseAddress(buffer), Int32((nextFrame * 8) % 256), CVPixelBufferGetDataSize(buffer))
+                if letterbox > 0 {
+                    // Grey picture between black bars that take `letterbox` of the height above and below.
+                    memset(CVPixelBufferGetBaseAddress(buffer), 140, CVPixelBufferGetDataSize(buffer))
+                    let rows = Int(size.height * letterbox), rowBytes = CVPixelBufferGetBytesPerRow(buffer)
+                    let base = CVPixelBufferGetBaseAddress(buffer)!
+                    memset(base, 0, rows * rowBytes)
+                    memset(base + (Int(size.height) - rows) * rowBytes, 0, rows * rowBytes)
+                } else {
+                    memset(CVPixelBufferGetBaseAddress(buffer), Int32((nextFrame * 8) % 256), CVPixelBufferGetDataSize(buffer))
+                }
                 CVPixelBufferUnlockBaseAddress(buffer, [])
                 adaptor.append(buffer, withPresentationTime: CMTime(value: CMTimeValue(nextFrame), timescale: CMTimeScale(fps)))
                 nextFrame += 1
