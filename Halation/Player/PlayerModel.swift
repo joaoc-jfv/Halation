@@ -9,6 +9,7 @@ final class PlayerModel {
     private(set) var currentURL: URL?
     private(set) var currentTime: Duration = .zero
     private(set) var duration: Duration = .zero
+    private(set) var buffered: Duration = .zero
     private(set) var isBuffering = false
     private(set) var mediaInfo: MediaInfo?
     private(set) var audioTracks: [MediaTrack] = []
@@ -22,6 +23,11 @@ final class PlayerModel {
     private(set) var isMuted = false
     private(set) var audioOutputMode: AudioOutputMode = .spatial
 
+    // UI-only state
+    private(set) var controlsVisible = true
+    private(set) var isPointerOverControls = false
+    private(set) var toast: Toast?
+
     var isPlaying: Bool { state == .playing }
     var hasMedia: Bool { currentURL != nil }
     var errorMessage: String? {
@@ -32,6 +38,13 @@ final class PlayerModel {
     @ObservationIgnored private var openTask: Task<Void, Never>?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
     @ObservationIgnored private var scopedURL: URL?
+    @ObservationIgnored private var hideTask: Task<Void, Never>?
+    @ObservationIgnored private var toastTask: Task<Void, Never>?
+    @ObservationIgnored private var lastActivity = ContinuousClock.now
+
+    /// How long the controls stay up without mouse or keyboard activity while playing.
+    @ObservationIgnored var autoHideDelay: Duration = .seconds(2.5)
+    @ObservationIgnored var toastDuration: Duration = .seconds(1.2)
 
     // MARK: Opening
 
@@ -91,8 +104,11 @@ final class PlayerModel {
         scopedURL?.stopAccessingSecurityScopedResource()
         scopedURL = nil
         state = .idle
+        cancelHideTimer()
+        controlsVisible = true
         currentTime = .zero
         duration = .zero
+        buffered = .zero
         isBuffering = false
         mediaInfo = nil
         audioTracks = []
@@ -103,10 +119,14 @@ final class PlayerModel {
 
     private func handle(_ event: PlaybackEvent) {
         switch event {
-        case .stateChanged(let newState): state = newState
+        case .stateChanged(let newState):
+            state = newState
+            // A new state counts as activity: paused shows the controls, playing starts the countdown.
+            registerActivity()
         case .timeChanged(let time): currentTime = time
         case .durationChanged(let newDuration): duration = newDuration
         case .bufferingChanged(let buffering): isBuffering = buffering
+        case .bufferedChanged(let end): buffered = end
         case .mediaInfoChanged(let info): mediaInfo = info
         case .tracksChanged:
             guard let engine else { return }
@@ -139,6 +159,56 @@ final class PlayerModel {
 
     func stepFrame(forward: Bool) {
         engine?.step(frames: forward ? 1 : -1)
+    }
+
+    // MARK: Controls visibility
+
+    private var shouldKeepControlsVisible: Bool { !isPlaying || isPointerOverControls }
+
+    /// Call on mouse movement or any key. Shows the controls and restarts the auto-hide countdown.
+    func registerActivity() {
+        lastActivity = .now
+        controlsVisible = true
+        startHideTimerIfNeeded()
+    }
+
+    func setPointerOverControls(_ isOver: Bool) {
+        guard isOver != isPointerOverControls else { return }
+        isPointerOverControls = isOver
+        if isOver { cancelHideTimer() }
+        registerActivity()
+    }
+
+    private func startHideTimerIfNeeded() {
+        guard hideTask == nil, !shouldKeepControlsVisible else { return }
+        hideTask = Task {
+            // Mouse movement only moves `lastActivity`, so this loop re-sleeps instead of restarting.
+            while !Task.isCancelled {
+                let deadline = lastActivity + autoHideDelay
+                guard ContinuousClock.now < deadline else { break }
+                try? await Task.sleep(until: deadline, clock: .continuous)
+            }
+            guard !Task.isCancelled else { return }
+            hideTask = nil
+            if !shouldKeepControlsVisible { controlsVisible = false }
+        }
+    }
+
+    private func cancelHideTimer() {
+        hideTask?.cancel()
+        hideTask = nil
+    }
+
+    // MARK: Toasts
+
+    func showToast(_ text: String, symbol: String? = nil) {
+        toast = Toast(text: text, symbol: symbol)
+        toastTask?.cancel()
+        toastTask = Task {
+            try? await Task.sleep(for: toastDuration)
+            guard !Task.isCancelled else { return }
+            toast = nil
+        }
     }
 
     // MARK: Audio and rate

@@ -14,6 +14,17 @@ final class WindowController {
         window.collectionBehavior.insert(.fullScreenPrimary)
     }
 
+    /// Fades the traffic lights with the player controls.
+    func setChromeVisible(_ visible: Bool) {
+        guard let window else { return }
+        let buttons = [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton]
+            .compactMap { window.standardWindowButton($0) }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.25
+            buttons.forEach { $0.animator().alphaValue = visible ? 1 : 0 }
+        }
+    }
+
     func toggleFullScreen() {
         window?.toggleFullScreen(nil)
     }

@@ -12,13 +12,6 @@ struct HalationApp: App {
         }
         .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 960, height: 540)
-        .commands {
-            CommandGroup(replacing: .newItem) {
-                Button("Open…") {
-                    OpenPanel.chooseVideo { player.open($0) }
-                }
-                .keyboardShortcut("o")
-            }
-        }
+        .commands { AppCommands(player: player) }
     }
 }

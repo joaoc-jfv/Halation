@@ -85,6 +85,7 @@ final class AVFoundationEngine: PlaybackEngine {
         refreshTracks()
         player.replaceCurrentItem(with: item)
         refreshState()
+        refreshBuffered()
 
         if let startAt { await seek(to: startAt, precise: true) }
     }
@@ -211,6 +212,9 @@ final class AVFoundationEngine: PlaybackEngine {
         itemObservations.append(item.observe(\.status) { [weak self] _, _ in
             Task { @MainActor in self?.refreshState() }
         })
+        itemObservations.append(item.observe(\.loadedTimeRanges) { [weak self] _, _ in
+            Task { @MainActor in self?.refreshBuffered() }
+        })
         endObserver = NotificationCenter.default.addObserver(
             forName: AVPlayerItem.didPlayToEndTimeNotification, object: item, queue: .main
         ) { [weak self] _ in
@@ -274,6 +278,14 @@ final class AVFoundationEngine: PlaybackEngine {
             isBuffering = buffering
             emit(.bufferingChanged(buffering))
         }
+    }
+
+    private func refreshBuffered() {
+        guard let item else { return }
+        let now = player.currentTime()
+        let ranges = item.loadedTimeRanges.map(\.timeRangeValue)
+        let current = ranges.first { $0.containsTime(now) } ?? ranges.last
+        if let end = current.flatMap({ Duration($0.end) }) { emit(.bufferedChanged(end)) }
     }
 
     private func setState(_ newState: PlaybackState) {

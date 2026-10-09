@@ -3,7 +3,7 @@
 > **Halation** (n.): the soft glow that forms around bright highlights on film.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core) and 1.3 (video surface and window) are done; see §7 for the order of the rest.
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core), 1.3 (video surface and window) and 1.4 (Liquid Glass controls) are done; see §7 for the order of the rest.
 
 ---
 
@@ -99,7 +99,7 @@ protocol PlaybackEngine: AnyObject {
 }
 ```
 
-Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/failed), `PlaybackError`, `PlaybackEvent` (state, time, duration, buffering, media info, tracks changed), `MediaTrack` (id, kind, language, title, codec, channels, isDefault, isForced, `isSpatial`), `MediaInfo` (container, engine name, HDR format, codecs, resolution, frame rate, bitrate; audio layout and chapters join it in 1.5 and 1.8), `AudioOutputMode`, `EngineCapabilities`. `HDRFormat` (.sdr/.hdr10/.hdr10Plus/.hlg/.dolbyVision(profile, compatibilityID)) lives in `PlaybackTypes.swift`, and `CropMode` with the crop panel (1.7). An engine instance serves one file; `PlayerModel` creates a new one for each open and applies its stored rate, volume, mute and output mode.
+Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/failed), `PlaybackError`, `PlaybackEvent` (state, time, duration, buffering, buffered range, media info, tracks changed), `MediaTrack` (id, kind, language, title, codec, channels, isDefault, isForced, `isSpatial`), `MediaInfo` (container, engine name, HDR format, codecs, resolution, frame rate, bitrate; audio layout and chapters join it in 1.5 and 1.8), `AudioOutputMode`, `EngineCapabilities`. `HDRFormat` (.sdr/.hdr10/.hdr10Plus/.hlg/.dolbyVision(profile, compatibilityID)) lives in `PlaybackTypes.swift`, and `CropMode` with the crop panel (1.7). An engine instance serves one file; `PlayerModel` creates a new one for each open and applies its stored rate, volume, mute and output mode.
 
 `PlayerModel` translates engine events into simple observable properties (`isPlaying`, `currentTime`, `duration`, `buffered`, `mediaInfo`, track lists, selected tracks) and holds UI-only state (controls visible, active panel, crop mode, external subtitle track).
 
@@ -144,11 +144,11 @@ Halation/
 │   │   ├── Remux/          (phase 2)
 │   │   └── MPV/            (phase 3)
 │   ├── Media/          CodecNames.swift, MediaProbe.swift, HDRDetection.swift, AudioFormatDetection.swift
-│   ├── Player/         PlayerModel.swift, TimeFormatting.swift
+│   ├── Player/         PlayerModel.swift, PlayerModel+Shortcuts.swift, PlaybackSpeed.swift, Toast.swift, TimeFormatting.swift
 │   ├── Subtitles/      SubtitleCue.swift, SRTParser.swift, WebVTTParser.swift, SubtitleTrackStore.swift
 │   ├── UI/
 │   │   ├── Player/     PlayerWindowView.swift, VideoSurfaceView.swift, WindowController.swift, WindowSizing.swift, OpenPanel.swift, SubtitleOverlay.swift
-│   │   ├── Controls/   ControlBar.swift, Scrubber.swift, TrackPanel.swift, SpeedPanel.swift, CropPanel.swift, VolumeControl.swift
+│   │   ├── Controls/   ControlBar.swift, TrackSlider.swift (scrubber and volume), TrackPanel.swift, SpeedPanel.swift, CropPanel.swift, VolumeControl.swift
 │   │   ├── HUD/        InfoHUD.swift, FormatBadges.swift, OSDToast.swift
 │   │   └── Welcome/    WelcomeView.swift (drop zone + recents)
 │   ├── Services/       NowPlayingService.swift, ResumeStore.swift, RecentFiles.swift, Preferences.swift, PiPController.swift
@@ -234,6 +234,8 @@ Halation/
 | ⌘O | Open |
 | Esc | Exit full screen / close panel |
 
+Landing order: everything except the rows below shipped in 1.4. Audio and subtitle cycling (A/S) work on the engine's embedded tracks now and get their panel and preferences in 1.5. Subtitle delay (Z/X) comes with 1.6, crop (C) with 1.7, chapters (⌥←/⌥→) with 1.8, and the info panel (I) with 1.9. Esc leaving full screen is AppKit's own behavior.
+
 All shortcuts also appear in the menu bar (Playback, Audio, Subtitles, Video menus) so they're discoverable and accessible.
 
 ---
@@ -243,7 +245,7 @@ All shortcuts also appear in the menu bar (Playback, Audio, Subtitles, Video men
 **Principle:** the video is the content and glass is the chrome. Controls float over the video and disappear when not needed.
 
 - **Window:** `.windowStyle(.hiddenTitleBar)`, full-size content view, the video fills the window edge to edge. Traffic lights float over the video and fade with the controls. The window resizes to the video's aspect ratio when a file opens: native size, at least 640 pt wide, capped to 80% of the screen (`WindowSizing`). It is not aspect-locked afterwards. Black window background.
-- **Control bar:** a floating capsule, bottom-center, inset 20 pt from the bottom, max width ~720 pt. Uses `.glassEffect(.regular.interactive(), in: .capsule)` inside a `GlassEffectContainer` so panels can **morph out of the bar** (with `glassEffectID` and a `@Namespace`).
+- **Control bar:** a floating capsule, bottom-center, inset 20 pt from the bottom, max width ~720 pt. Uses `.glassEffect(.regular.interactive(), in: .capsule)` inside a `GlassEffectContainer` so panels can **morph out of the bar** (shortcuts are menu key equivalents with no modifier, so they win over a focused slider; auto-hide runs in `PlayerModel`, which restarts nothing on mouse movement and just moves a last-activity timestamp) (with `glassEffectID` and a `@Namespace`).
   - Left: play/pause, −10 s, +10 s.
   - Center: elapsed time · scrubber (buffered range, chapter ticks, hover thumbnail) · remaining time (click to toggle total).
   - Right: volume, **Audio & Subtitles** (one button, one panel with two columns like the Apple TV app), speed, crop/aspect, PiP, full screen.

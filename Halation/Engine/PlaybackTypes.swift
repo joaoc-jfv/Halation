@@ -30,6 +30,8 @@ enum PlaybackEvent: Sendable {
     case timeChanged(Duration)
     case durationChanged(Duration)
     case bufferingChanged(Bool)
+    /// End of the loaded range around the playhead.
+    case bufferedChanged(Duration)
     case mediaInfoChanged(MediaInfo)
     /// Track lists or the selected tracks changed; re-read them from the engine.
     case tracksChanged
