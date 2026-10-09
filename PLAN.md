@@ -49,7 +49,7 @@ This document is the full build plan. It is written so that an engineer (or anot
 - `Halation.app` is signed ad hoc, so Hardened Runtime is off; real signing, notarization and Sparkle are phase 4.
 
 ### Decisions that belong to the owner
-- **License for Halation** (§9 item 7). FFmpeg is linked **statically under the LGPL**, so users must be able to relink; open-sourcing is the simplest answer. Needed before shipping phase 2.
+- **License for Halation: decided, MIT** (§9 item 7). Public repo, free for now; premium features may come later as a closed module (open core), which MIT allows because the owner holds the copyright. Don't copy GPL code (IINA, mpv) into the app, and stay on MPVKit's LGPL variant. Still open: the name check (§9 item 6).
 - "Dolby Vision" is used as the descriptive name (decided in 1.9, one place: `HDRFormat.badge`). "Dolby Atmos" is never shown; a test checks it.
 - FFmpeg and libmpv come from MPVKit's release assets, whose README says it is lightly maintained. `Packages/FFmpegKit` now depends on the `MPVKit` package (LGPL variant, pinned to 1.1.0-n9.0.2) and links its static libraries explicitly. AetherEngine (a library that already does this whole job) is the fallback or reference.
 
@@ -452,7 +452,7 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 4. **MPVKit** packaging and licensing: an LGPL build exists (the plain `MPVKit` product, FFmpeg n9, static) and it released recently, but its README disclaims regular maintenance and points to AetherEngine for production. **Static LGPL linking** also means users must be able to relink the app with another FFmpeg, which is simplest if Halation is open source (see 7).
 5. **"Dolby Vision" naming in the UI:** same trademark concern as Atmos. **Decided in 1.9: keep "Dolby Vision"**, as a descriptive name of the format (the info panel adds the profile, e.g. "Dolby Vision 8.1"). It is written once, in `HDRFormat.badge`, so switching to a neutral label such as "DV" is a one-line change. "Dolby Atmos" stays out of all user-facing text (a test checks the badges and info panel).
 6. **Name check:** "Halation" may be used by other apps (for example photo filter apps). Search the App Store and trademarks before publishing anything public.
-7. **License for Halation itself:** MIT (with LGPL dependencies) vs GPLv3 (would allow borrowing from IINA/mpv GPL code). **Decision needed** before phase 3, and in practice before shipping phase 2: FFmpeg is linked statically under the LGPL, so closed distribution would need object files or another way to relink.
+7. **License for Halation itself:** **decided, MIT**, with the LGPL dependencies listed in `THIRD-PARTY-NOTICES.md` (the source is public, so the relinking duty is met). GPLv3 was rejected because it would block a future closed premium tier. Consequence: no copying of GPL code from IINA or mpv; reading it for ideas is fine.
 
 ---
 

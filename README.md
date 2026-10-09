@@ -48,3 +48,7 @@ xcodebuild -scheme Halation -destination 'platform=macOS' test
 `project.yml` is the source of truth for the project, the Info.plist and the sandbox entitlements; the Xcode project is generated and not committed.
 
 Test media goes in the gitignored `TestMedia/` folder and is never committed.
+
+## License
+
+MIT, see [LICENSE](LICENSE). The app links FFmpeg and libmpv (LGPL) through MPVKit; see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).
