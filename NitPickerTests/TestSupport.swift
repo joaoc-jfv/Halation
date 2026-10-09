@@ -65,6 +65,8 @@ final class FakeEngine: PlaybackEngine {
     var selectedSubtitleTrack: MediaTrack?
     var drawsSubtitlesNatively = false
     var isCompatibilityEngine = false
+    var supportsVideoAdjustments = false
+    private(set) var adjustments: [VideoAdjustments] = []
     private(set) var loadedStarts: [Duration?] = []
     private(set) var subtitleDelays: [Duration] = []
     private(set) var subtitleStyles: [SubtitleStyle] = []
@@ -101,6 +103,7 @@ final class FakeEngine: PlaybackEngine {
     func pause() { isPlaying = false; emit(.stateChanged(.paused)) }
     func seek(to time: Duration, precise: Bool) async { seeks.append(time); advance(to: time) }
     func step(frames: Int) {}
+    func setVideoAdjustments(_ value: VideoAdjustments) { adjustments.append(value) }
     func setSubtitleDelay(_ delay: Duration) { subtitleDelays.append(delay) }
     func setSubtitleStyle(_ style: SubtitleStyle) { subtitleStyles.append(style) }
     func setSubtitleLift(_ fraction: Double) { subtitleLifts.append(fraction) }

@@ -47,6 +47,12 @@ struct ControlBar: View {
                 symbol: "crop", label: "Crop and Aspect Ratio",
                 isActive: player.activePanel == .crop || !player.videoLayout.isDefault
             ) { player.togglePanel(.crop) }
+            if player.supportsVideoAdjustments {
+                ControlButton(
+                    symbol: "slider.horizontal.3", label: "Picture Adjustments",
+                    isActive: player.activePanel == .adjustments || !player.videoAdjustments.isDefault
+                ) { player.togglePanel(.adjustments) }
+            }
             speedButton
             if player.isPictureInPictureAvailable {
                 ControlButton(

@@ -125,6 +125,9 @@ struct AppCommands: Commands {
                 }
                 .keyboardShortcut("p", modifiers: [])
                 Divider()
+                Button("Picture Adjustments…") { player.showAdjustmentsPanel() }
+                Button("Reset Picture Adjustments") { player.resetVideoAdjustments() }
+                    .disabled(player.videoAdjustments.isDefault)
                 Toggle("Compatibility Engine", isOn: Binding(
                     get: { player.isCompatibilityEngine },
                     set: { _ in player.toggleCompatibilityEngine() }

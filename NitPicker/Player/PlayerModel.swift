@@ -41,6 +41,9 @@ final class PlayerModel {
     /// The next episode, offered during the last seconds of an episode.
     private(set) var upNext: UpNext?
     private(set) var autoplaysNextEpisode: Bool
+    /// Brightness, contrast and saturation, for the open file; only the compatibility engine applies them.
+    private(set) var videoAdjustments = VideoAdjustments()
+    private(set) var supportsVideoAdjustments = false
     private(set) var cropsBlackBarsAutomatically: Bool
     private(set) var isDetectingBlackBars = false
     /// The open file plays on libmpv (see `PlaybackEngine.isCompatibilityEngine`).
@@ -217,6 +220,8 @@ final class PlayerModel {
         engine.stretchesVideoToFrame = videoLayout.aspect != .auto
         enginePaintsSubtitles = engine.drawsSubtitlesNatively
         isCompatibilityEngine = engine.isCompatibilityEngine
+        supportsVideoAdjustments = engine.supportsVideoAdjustments
+        engine.setVideoAdjustments(videoAdjustments)
         engine.setSubtitleStyle(subtitles.style)
         engine.setSubtitleDelay(subtitles.delay)
         isPictureInPictureAvailable = engine.isPictureInPictureAvailable
@@ -237,6 +242,7 @@ final class PlayerModel {
         videoView = nil
         enginePaintsSubtitles = false
         isCompatibilityEngine = false
+        supportsVideoAdjustments = false
         mediaInfo = nil
         audioTracks = []
         subtitleTracks = []
@@ -270,6 +276,8 @@ final class PlayerModel {
         videoView = nil
         enginePaintsSubtitles = false
         isCompatibilityEngine = false
+        supportsVideoAdjustments = false
+        videoAdjustments = VideoAdjustments()
         videoLayout = VideoLayout()
         scopedURL?.stopAccessingSecurityScopedResource()
         scopedURL = nil
@@ -829,6 +837,7 @@ struct ScrubPreview {
 enum PlayerPanel: Equatable {
     case audioSubtitles
     case crop
+    case adjustments
     case speed
 }
 
@@ -947,5 +956,27 @@ extension PlayerModel {
             updateLayout { $0.detectedCrop = ratio; $0.crop = .none }
             showToast("Cropped black bars: \(VideoLayout.label(forRatio: ratio))", symbol: "crop")
         }
+    }
+}
+
+// MARK: Picture adjustments
+
+extension PlayerModel {
+    func setVideoAdjustments(_ adjustments: VideoAdjustments) {
+        let value = adjustments.clamped()
+        guard value != videoAdjustments else { return }
+        videoAdjustments = value
+        engine?.setVideoAdjustments(value)
+    }
+
+    func resetVideoAdjustments() { setVideoAdjustments(VideoAdjustments()) }
+
+    /// Opens the picture panel, or says what it needs when the engine can't adjust.
+    func showAdjustmentsPanel() {
+        guard supportsVideoAdjustments else {
+            showToast("Picture adjustments need the Compatibility Engine", symbol: "slider.horizontal.3")
+            return
+        }
+        togglePanel(.adjustments)
     }
 }

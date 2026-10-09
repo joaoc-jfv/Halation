@@ -42,6 +42,7 @@ final class MPVEngine: PlaybackEngine {
     private var storedVolume: Float = 1
     private var storedMuted = false
     private var stretches = false
+    private var storedAdjustments = VideoAdjustments()
     private var storedSubtitleDelay: Duration = .zero
     private var storedSubtitleStyle = SubtitleStyle()
     private var storedSubtitleLift = 0.06
@@ -89,6 +90,7 @@ final class MPVEngine: PlaybackEngine {
         handle.set("keepaspect", flag: !stretches)
         handle.set("sub-delay", double: storedSubtitleDelay.seconds)
         applySubtitleStyle(to: handle)
+        applyAdjustments(to: handle)
         let stream = handle.events
         consuming = Task { [weak self] in
             for await event in stream { self?.handle(event) }
@@ -359,6 +361,19 @@ final class MPVEngine: PlaybackEngine {
     /// mpv can only capture the frame on screen, so stills come from a second decode path (see `MPVThumbnailer`).
     func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage? {
         await thumbnailer?.thumbnail(at: time, maxSize: maxSize)
+    }
+
+    // MARK: Picture adjustments
+
+    var supportsVideoAdjustments: Bool { true }
+
+    func setVideoAdjustments(_ adjustments: VideoAdjustments) {
+        storedAdjustments = adjustments.clamped()
+        if let mpv { applyAdjustments(to: mpv) }
+    }
+
+    private func applyAdjustments(to handle: MPVHandle) {
+        for (name, value) in storedAdjustments.mpvProperties { handle.set(name, double: value) }
     }
 
     // MARK: Subtitles

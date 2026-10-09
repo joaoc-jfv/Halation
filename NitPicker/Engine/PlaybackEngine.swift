@@ -51,6 +51,10 @@ protocol PlaybackEngine: AnyObject {
     /// nil if the engine can't. The caller selects it.
     func addExternalSubtitle(_ url: URL, title: String?, language: String?) -> MediaTrack?
 
+    /// Whether the engine can change brightness, contrast and saturation without touching the video's colour pipeline (only mpv).
+    var supportsVideoAdjustments: Bool { get }
+    func setVideoAdjustments(_ adjustments: VideoAdjustments)
+
     /// A still from around `time`, no larger than `maxSize`, for artwork and scrub previews. Nil if none could be made.
     func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage?
 
@@ -79,6 +83,8 @@ extension PlaybackEngine {
     func subtitleCues(for track: MediaTrack) -> SubtitleCueList? { nil }
     var drawsSubtitlesNatively: Bool { false }
     var isCompatibilityEngine: Bool { false }
+    var supportsVideoAdjustments: Bool { false }
+    func setVideoAdjustments(_ adjustments: VideoAdjustments) {}
     func setSubtitleDelay(_ delay: Duration) {}
     func setSubtitleStyle(_ style: SubtitleStyle) {}
     func setSubtitleLift(_ fraction: Double) {}

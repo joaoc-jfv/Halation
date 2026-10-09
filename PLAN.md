@@ -433,7 +433,7 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 |---|---|---|
 | 4.1 | **Folder playlists**, next/previous episode detection (`S01E02`), "Up next" | **Done** (see 4.1 notes) |
 | 4.2 | Auto black-bar crop detection | **Done** (see 4.2 notes) |
-| 4.3 | Video adjustments (brightness, contrast, saturation) on the mpv engine | Not started |
+| 4.3 | Video adjustments (brightness, contrast, saturation) on the mpv engine | **Done** (see 4.3 notes) |
 | 4.4 | Screenshots (⌘⇧S), HDR HEIC when the source is HDR | Not started |
 | 4.5 | Packaging: notarized DMG script. Sparkle, the website and subtitle downloads need accounts and keys that only the owner can create, so they are listed as owner tasks | Not started |
 
@@ -446,6 +446,9 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 - `BlackBarDetector` (pure) reads ten stills the engine gives through `thumbnail(at:maxSize:)` (at 5% to 86% of the file), so it works on every engine and needs no `AVPlayerItemVideoOutput`. A row or column is picture when more than 2% of its pixels are brighter than luma 28; a still with under 4% picture (a fade) is ignored; the bars are the smallest each side shows in any still (so a dark scene only makes it more cautious), at least four usable stills are needed, and bars under 2% are not cropped. The crop is centred, so only the thinner bar of a pair counts. The result is a ratio (`VideoLayout.detectedCrop`), applied by `VideoGeometry` like the presets, so it is still just frame sizing and HDR is untouched; choosing a preset or Reset clears it.
 - Video ▸ Detect Black Bars (⇧C) and a row in the crop panel always answer with a toast ("Cropped black bars: 2.39:1" or "No black bars found"). Settings ▸ Playback ▸ "Crop black bars when a file opens" (off by default) runs it 1.5 s after opening and only speaks when it crops.
 - Verified on a generated letterboxed MP4 through the real AVFoundation engine (2.39:1 found within 0.2) and on synthetic stills; not on a real letterboxed film (none in `TestMedia/`). HDR and mpv stills come out tone-mapped or dull, which doesn't matter for finding black.
+4.3 notes (done):
+- `VideoAdjustments` (-100...100, mpv's scale) are the engine's `supportsVideoAdjustments` / `setVideoAdjustments`; only `MPVEngine` says yes, because the AVFoundation path would need a video composition or Core Image, which breaks HDR and Dolby Vision (CLAUDE.md). The control bar shows a Picture button and a panel (three sliders, Reset) only when the open file plays on mpv; Video ▸ Picture Adjustments… opens the panel or, on another engine, says it needs the Compatibility Engine (which Video ▸ Compatibility Engine switches to at the same position). Values belong to the open file: they reset when another file opens, and carry over when the engine is switched.
+- **Verified in the real app** by setting the sliders through the accessibility API and capturing the window: saturation −100 gives a grey picture, brightness 70 a much brighter one, and the paused frame updates at once. A unit test can't see it, because `screenshot-raw` in this build doesn't include the equaliser (its pixels didn't change with any of brightness, contrast, saturation or gamma); the tests check mpv's own state (values accepted, kept, clamped, applied before loading).
 - Remaining Phase 4 ideas, as written originally: subtitle downloads (OpenSubtitles API; needs an API key and consent screens), Sparkle updates, notarized DMG, website.
 
 ## 8. Testing strategy

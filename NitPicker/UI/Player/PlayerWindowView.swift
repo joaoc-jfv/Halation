@@ -135,6 +135,7 @@ private struct ControlsOverlay: View {
                         switch panel {
                         case .audioSubtitles: TrackPanel()
                         case .crop: CropPanel()
+                        case .adjustments: AdjustmentsPanel()
                         case .speed: SpeedPanel()
                         }
                     }

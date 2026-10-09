@@ -487,3 +487,73 @@ extension MPVSubtitleTests {
         #expect(engine.currentTime.seconds > position)
     }
 }
+
+@MainActor
+@Suite struct VideoAdjustmentsTests {
+    @Test func clampsToMPVsScaleAndNamesItsProperties() {
+        let wild = VideoAdjustments(brightness: 400, contrast: -400, saturation: 7).clamped()
+        #expect(wild == VideoAdjustments(brightness: 100, contrast: -100, saturation: 7))
+        #expect(VideoAdjustments().isDefault && !wild.isDefault)
+        #expect(wild.mpvProperties.map(\.name) == ["brightness", "contrast", "saturation"])
+    }
+
+    @Test func onlyTheCompatibilityEngineOffersThemAndTheModelSaysWhyOtherwise() async {
+        let plain = FakeEngine()
+        let player = PlayerModel(services: .testing(), engineFactory: { _ in plain })
+        defer { player.close() }
+        player.open(URL(fileURLWithPath: "/Movies/film.mp4"))
+        await waitUntil("playback") { player.state == .playing }
+        #expect(!player.supportsVideoAdjustments)
+        player.showAdjustmentsPanel()
+        #expect(player.activePanel == nil && player.toast?.text == "Picture adjustments need the Compatibility Engine")
+    }
+
+    @Test func theModelHandsThemToTheEngineKeepsThemForTheFileAndResetsThemForTheNextOne() async {
+        var made: [FakeEngine] = []
+        let player = PlayerModel(services: .testing(), engineFactory: { _ in
+            let fresh = FakeEngine()
+            fresh.supportsVideoAdjustments = true
+            made.append(fresh)
+            return fresh
+        })
+        defer { player.close() }
+        player.open(URL(fileURLWithPath: "/Movies/film.mkv"))
+        await waitUntil("playback") { player.state == .playing }
+        let engine = made[0]
+        #expect(player.supportsVideoAdjustments)
+        player.showAdjustmentsPanel()
+        #expect(player.activePanel == .adjustments)
+
+        player.setVideoAdjustments(VideoAdjustments(brightness: 30, contrast: 500, saturation: -20))
+        #expect(player.videoAdjustments == VideoAdjustments(brightness: 30, contrast: 100, saturation: -20))
+        #expect(engine.adjustments.last == player.videoAdjustments)
+        let count = engine.adjustments.count
+        player.setVideoAdjustments(player.videoAdjustments)
+        #expect(engine.adjustments.count == count, "no change, nothing sent")
+        player.resetVideoAdjustments()
+        #expect(player.videoAdjustments.isDefault && engine.adjustments.last?.isDefault == true)
+
+        player.setVideoAdjustments(VideoAdjustments(brightness: 10))
+        player.open(URL(fileURLWithPath: "/Movies/other.mkv"))
+        await waitUntil("the next file") { player.currentURL?.lastPathComponent == "other.mkv" && player.state == .playing }
+        #expect(player.videoAdjustments.isDefault)
+    }
+
+    @Test func mpvTakesTheValuesAndKeepsThemForTheNextOpen() async throws {
+        // `screenshot-raw` doesn't include the colour adjustments in this build, so the picture itself is checked in the real
+        // app (PLAN.md 4.3 notes); here mpv's own state is.
+        let file = try LegacyFixture.makeMPEG4(seconds: 3)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let engine = MPVEngine()
+        engine.setVideoAdjustments(VideoAdjustments(brightness: 20, contrast: -30, saturation: 40))  // before loading
+        try await engine.load(file, startAt: nil)
+        defer { engine.close() }
+        #expect(engine.supportsVideoAdjustments)
+        let handle = try #require(engine.handleForTesting)
+        #expect(handle.double("brightness") == 20 && handle.double("contrast") == -30 && handle.double("saturation") == 40)
+        engine.setVideoAdjustments(VideoAdjustments(brightness: 500))
+        #expect(handle.double("brightness") == 100, "clamped to mpv's range")
+        engine.setVideoAdjustments(VideoAdjustments())
+        #expect(handle.double("brightness") == 0 && handle.double("contrast") == 0 && handle.double("saturation") == 0)
+    }
+}
