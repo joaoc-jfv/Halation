@@ -64,6 +64,8 @@ final class FakeEngine: PlaybackEngine {
     var selectedAudioTrack: MediaTrack?
     var selectedSubtitleTrack: MediaTrack?
     var drawsSubtitlesNatively = false
+    var isCompatibilityEngine = false
+    private(set) var loadedStarts: [Duration?] = []
     private(set) var subtitleDelays: [Duration] = []
     private(set) var subtitleStyles: [SubtitleStyle] = []
     private(set) var subtitleLifts: [Double] = []
@@ -87,6 +89,7 @@ final class FakeEngine: PlaybackEngine {
 
     func load(_ url: URL, startAt: Duration?) async throws {
         loadedURLs.append(url)
+        loadedStarts.append(startAt)
         if let loadError { throw loadError }
         emit(.durationChanged(duration))
         emit(.mediaInfoChanged(info))

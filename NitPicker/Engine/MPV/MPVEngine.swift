@@ -320,6 +320,7 @@ final class MPVEngine: PlaybackEngine {
     // MARK: Subtitles
 
     var drawsSubtitlesNatively: Bool { true }
+    var isCompatibilityEngine: Bool { true }
 
     func setSubtitleDelay(_ delay: Duration) {
         storedSubtitleDelay = delay

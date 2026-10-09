@@ -115,6 +115,11 @@ struct AppCommands: Commands {
                 }
                 .keyboardShortcut("p", modifiers: [])
                 Divider()
+                Toggle("Compatibility Engine", isOn: Binding(
+                    get: { player.isCompatibilityEngine },
+                    set: { _ in player.toggleCompatibilityEngine() }
+                ))
+                Divider()
                 Button("Reset Video Adjustments") { player.resetVideoLayout() }
                     .disabled(player.videoLayout.isDefault)
             }

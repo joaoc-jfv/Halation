@@ -70,12 +70,15 @@ protocol PlaybackEngine: AnyObject {
 
     var audioOutputMode: AudioOutputMode { get set }
     var capabilities: EngineCapabilities { get }
+    /// Whether this is the libmpv engine, which plays what the others can't and has no Dolby Vision or system Spatial Audio.
+    var isCompatibilityEngine: Bool { get }
     func close()
 }
 
 extension PlaybackEngine {
     func subtitleCues(for track: MediaTrack) -> SubtitleCueList? { nil }
     var drawsSubtitlesNatively: Bool { false }
+    var isCompatibilityEngine: Bool { false }
     func setSubtitleDelay(_ delay: Duration) {}
     func setSubtitleStyle(_ style: SubtitleStyle) {}
     func setSubtitleLift(_ fraction: Double) {}

@@ -36,6 +36,8 @@ final class PlayerModel {
     private(set) var isPictureInPictureActive = false
     private(set) var isHDRPlaybackEligible = false
     private(set) var showsInfoPanel = false
+    /// The open file plays on libmpv (see `PlaybackEngine.isCompatibilityEngine`).
+    private(set) var isCompatibilityEngine = false
     /// The engine draws subtitles itself (mpv), so the delay and the lift above the controls go to it.
     private(set) var enginePaintsSubtitles = false
     private(set) var scrubPreview: ScrubPreview?
@@ -126,9 +128,15 @@ final class PlayerModel {
 
     // MARK: Opening
 
-    func open(_ url: URL) {
+    func open(_ url: URL, startAt: Duration? = nil, compatibility: Bool = false) {
         openTask?.cancel()
-        openTask = Task { await performOpen(url) }
+        openTask = Task { await performOpen(url, startAt: startAt, compatibility: compatibility) }
+    }
+
+    /// Reopens the file on the other engine at the same place: libmpv for a file the main engines play, and back.
+    func toggleCompatibilityEngine() {
+        guard let url = currentURL else { return }
+        open(url, startAt: currentTime, compatibility: !isCompatibilityEngine)
     }
 
     func close() {
@@ -137,29 +145,29 @@ final class PlayerModel {
         currentURL = nil
     }
 
-    private func performOpen(_ url: URL) async {
+    private func performOpen(_ url: URL, startAt: Duration?, compatibility: Bool) async {
         teardown()
         currentURL = url
         state = .loading
         if url.startAccessingSecurityScopedResource() { scopedURL = url }
 
         do {
-            var engine = try engineFactory(url)
+            var engine = try (compatibility || preferences.forcesCompatibilityEngine) ? compatibilityFactory(url) : engineFactory(url)
             attach(engine)
             do {
-                try await engine.load(url, startAt: nil)
+                try await engine.load(url, startAt: startAt)
             } catch let error as PlaybackError where error.wantsCompatibilityEngine {
                 // The first engine can't play this file; libmpv may be able to.
                 discardEngine()
                 engine = try compatibilityFactory(url)
                 attach(engine)
-                try await engine.load(url, startAt: nil)
+                try await engine.load(url, startAt: startAt)
             }
             try Task.checkCancellation()
             applyTrackPreferences(to: engine)
             engine.play()
             services.recents.note(url)
-            offerResume(for: url)
+            if startAt == nil { offerResume(for: url) }
             loadSidecarSubtitles(for: url)
             loadArtwork(from: engine)
         } catch is CancellationError {
@@ -182,6 +190,7 @@ final class PlayerModel {
         engine.preferredAudioLanguage = preferences.audioLanguage
         engine.stretchesVideoToFrame = videoLayout.aspect != .auto
         enginePaintsSubtitles = engine.drawsSubtitlesNatively
+        isCompatibilityEngine = engine.isCompatibilityEngine
         engine.setSubtitleStyle(subtitles.style)
         engine.setSubtitleDelay(subtitles.delay)
         isPictureInPictureAvailable = engine.isPictureInPictureAvailable
@@ -201,6 +210,7 @@ final class PlayerModel {
         engine = nil
         videoView = nil
         enginePaintsSubtitles = false
+        isCompatibilityEngine = false
         mediaInfo = nil
         audioTracks = []
         subtitleTracks = []
@@ -233,6 +243,7 @@ final class PlayerModel {
         engine = nil
         videoView = nil
         enginePaintsSubtitles = false
+        isCompatibilityEngine = false
         videoLayout = VideoLayout()
         scopedURL?.stopAccessingSecurityScopedResource()
         scopedURL = nil

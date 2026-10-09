@@ -118,3 +118,45 @@ import Testing
         #expect(fake.addedSubtitleFiles.isEmpty)
     }
 }
+
+@MainActor
+@Suite struct CompatibilityEngineSwitchTests {
+    @Test func theMenuSwitchReopensTheFileOnTheOtherEngineAtTheSamePlace() async {
+        let main = FakeEngine(), compatibility = FakeEngine()
+        compatibility.isCompatibilityEngine = true
+        let player = PlayerModel(services: .testing(), engineFactory: { _ in main }, compatibilityFactory: { _ in compatibility })
+        defer { player.close() }
+        let url = URL(fileURLWithPath: "/Movies/film.mp4")
+        player.open(url)
+        await waitUntil("playback") { player.state == .playing }
+        #expect(!player.isCompatibilityEngine)
+        main.advance(to: .seconds(42))
+        await waitUntil("time") { player.currentTime == .seconds(42) }
+
+        player.toggleCompatibilityEngine()
+        await waitUntil("the other engine") { compatibility.loadedURLs == [url] }
+        #expect(compatibility.loadedStarts == [.seconds(42)])
+        await waitUntil("playback again") { player.state == .playing && player.isCompatibilityEngine }
+        #expect(main.closed)
+        #expect(player.resumeOffer == nil, "it picks up where it was, so there is nothing to offer")
+
+        compatibility.advance(to: .seconds(50))
+        await waitUntil("time") { player.currentTime == .seconds(50) }
+        let another = FakeEngine()
+        let back = PlayerModel(services: .testing(), engineFactory: { _ in another }, compatibilityFactory: { _ in compatibility })
+        defer { back.close() }
+        back.open(url, compatibility: true)
+        await waitUntil("compat first") { back.isCompatibilityEngine }
+    }
+
+    @Test func theHiddenPreferenceSendsEveryFileToTheCompatibilityEngine() async {
+        let preferences = TestPreferences.make()
+        preferences.forcesCompatibilityEngine = true
+        let main = FakeEngine(), compatibility = FakeEngine()
+        let player = PlayerModel(services: .testing(preferences: preferences), engineFactory: { _ in main }, compatibilityFactory: { _ in compatibility })
+        defer { player.close() }
+        player.open(URL(fileURLWithPath: "/Movies/film.mp4"))
+        await waitUntil("playback") { player.state == .playing }
+        #expect(main.loadedURLs.isEmpty && compatibility.loadedURLs.count == 1)
+    }
+}

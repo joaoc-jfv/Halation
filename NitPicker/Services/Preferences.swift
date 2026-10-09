@@ -10,6 +10,7 @@ final class Preferences {
         static let subtitleSize = "subtitleSize"
         static let subtitleBackground = "subtitleBackground"
         static let subtitleOffset = "subtitleOffset"
+        static let forcesCompatibilityEngine = "forceCompatibilityEngine"
     }
 
     private static let offValue = "off"
@@ -44,6 +45,13 @@ final class Preferences {
     var audioOutputMode: AudioOutputMode {
         get { defaults.string(forKey: Key.audioOutputMode) == "stereo" ? .stereo : .spatial }
         set { defaults.set(newValue == .stereo ? "stereo" : "spatial", forKey: Key.audioOutputMode) }
+    }
+
+    /// Hidden switch (`defaults write com.joaocadide.nitpicker forceCompatibilityEngine -bool YES`): play every file with libmpv.
+    /// For checking that engine on files the others would take, and for anyone who prefers it.
+    var forcesCompatibilityEngine: Bool {
+        get { defaults.bool(forKey: Key.forcesCompatibilityEngine) }
+        set { defaults.set(newValue, forKey: Key.forcesCompatibilityEngine) }
     }
 
     var subtitleStyle: SubtitleStyle {
