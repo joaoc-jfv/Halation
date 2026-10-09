@@ -3,7 +3,7 @@
 > **Halation** (n.): the soft glow that forms around bright highlights on film.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core), 1.3 (video surface and window), 1.4 (Liquid Glass controls), 1.5 (tracks), 1.6 (sidecar subtitles), 1.7 (crop, aspect, speed) and 1.8 (system integration) are done; see §7 for the order of the rest.
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core), 1.3 (video surface and window), 1.4 (Liquid Glass controls), 1.5 (tracks), 1.6 (sidecar subtitles), 1.7 (crop, aspect, speed), 1.8 (system integration) and 1.9 (info HUD, welcome, scrub thumbnails) are done; see §7 for the order of the rest.
 
 ---
 
@@ -143,16 +143,16 @@ Halation/
 │   │   ├── AVFoundation/   AVFoundationEngine.swift, AVTrackMapping.swift, PlayerLayerView.swift, PiPController.swift
 │   │   ├── Remux/          (phase 2)
 │   │   └── MPV/            (phase 3)
-│   ├── Media/          CodecNames.swift, LanguageMatching.swift, MediaProbe.swift, HDRDetection.swift, AudioFormatDetection.swift
+│   ├── Media/          CodecNames.swift, ColorDescription.swift, MediaBadges.swift, InfoSections.swift, LanguageMatching.swift, MediaProbe.swift, HDRDetection.swift, AudioFormatDetection.swift
 │   ├── Player/         PlayerModel.swift, PlayerModel+Shortcuts.swift, ChapterNavigation.swift, VideoLayout.swift, VideoGeometry.swift, TrackSelectionPolicy.swift, MediaTrack+Labels.swift, PlaybackSpeed.swift, Toast.swift, TimeFormatting.swift
 │   ├── Subtitles/      SubtitleCue.swift, SubtitleDecoding.swift, SRTParser.swift, WebVTTParser.swift, SubtitleMarkup.swift, SubtitleLoader.swift, SidecarSubtitles.swift, SubtitleStyle.swift, SubtitleTrackStore.swift
 │   ├── UI/
 │   │   ├── Player/     PlayerWindowView.swift, VideoSurfaceView.swift, WindowController.swift, WindowSizing.swift, OpenPanel.swift, SubtitleOverlay.swift, SubtitleLayout.swift
 │   │   ├── Settings/   SubtitleSettingsView.swift (⌘, window)
-│   │   ├── Controls/   ControlBar.swift, TrackSlider.swift (scrubber and volume), PanelRow.swift, TrackPanel.swift, CropPanel.swift, SpeedPanel.swift, TrackPanel.swift, SpeedPanel.swift, CropPanel.swift, VolumeControl.swift
-│   │   ├── HUD/        InfoHUD.swift, FormatBadges.swift (Spatial Audio badge so far), OSDToast.swift
+│   │   ├── Controls/   ControlBar.swift, TrackSlider.swift (scrubber and volume), ScrubPreviewView.swift, PanelRow.swift, TrackPanel.swift, CropPanel.swift, SpeedPanel.swift, TrackPanel.swift, SpeedPanel.swift, CropPanel.swift, VolumeControl.swift
+│   │   ├── HUD/        InfoHUD.swift, FormatBadges.swift (the Spatial Audio tag), OSDToast.swift
 │   │   └── Welcome/    WelcomeView.swift (drop zone + recents)
-│   ├── Services/       NowPlayingService.swift, ResumeStore.swift, RecentFiles.swift, SleepPrevention.swift, PlayerServices.swift, Preferences.swift, FolderAccess.swift
+│   ├── Services/       NowPlayingService.swift, ResumeStore.swift, RecentFiles.swift, ThumbnailCache.swift, SleepPrevention.swift, PlayerServices.swift, Preferences.swift, FolderAccess.swift
 │   └── Resources/      Assets.xcassets, Info.plist, Halation.entitlements
 └── HalationTests/
 ```
@@ -165,6 +165,7 @@ Halation/
 - Render with `AVPlayerLayer` hosted in a layer-backed `NSView`. On Apple Silicon with an EDR-capable display, AVFoundation outputs HDR as EDR automatically. **Do not** put an `AVVideoComposition` or Core Image filter in the path for normal playback, because that can strip HDR/DV metadata and costs performance.
 - Detection (`HDRDetection`): use `AVAssetTrack` media characteristics (`.containsHDRVideo`), the format description's transfer function (`kCVImageBufferTransferFunction_SMPTE_ST_2084_PQ` → HDR10, `_ITU_R_2100_HLG` → HLG), and the Dolby Vision codec types (`dvh1`/`dvhe`, or HEVC with a `dvcC`/`dvvC` extension) → DV profile.
 - Implementation notes (1.3): `AVPlayerLayer` switches to EDR by itself when HDR plays, so the layer needs no `wantsExtendedDynamicRangeContent` flag. `HDRDetection` works from the track's format description. Dolby Vision profile and compatibility ID come from the `dvcC`/`dvvC` record, so 8.1 reads as profile 8, ID 1 and 8.4 as profile 8, ID 4. HDR10+ can't be told apart from HDR10 there (its metadata is in the bitstream), so `.hdr10Plus` is never produced yet.
+- Implementation notes (1.9): the top-right pill is built from the resolution (by the longer side, so 3840×1600 is still 4K), the HDR badge, and "Spatial Audio" when the selected track is spatial and the output mode is Spatial. Clicking it, or `I`, expands the info panel; `Esc` closes an open bar panel first, then the info panel, then leaves full screen. The welcome screen's posters are small JPEGs in the caches folder, written when a file opens (the same frame as the Now Playing artwork). Scrub thumbnails come from nearby keyframes on a grid of about 1% of the duration, cached per file.
 - Show `AVPlayer.eligibleForHDRPlayback` in the info panel so users know if their display or setup can show HDR.
 - Keep `AVPlayerItem.appliesPerFrameHDRDisplayMetadata = true` (the default) for DV and HDR10+.
 - Badge in the HUD: `HDR10`, `HDR10+`, `HLG`, `Dolby Vision` (see open question about DV naming), or nothing for SDR.
@@ -345,7 +346,7 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 2. **E-AC-3 JOC detection API:** no media characteristic exists, so the `dec3` parser (milestone 1.5) is the approach. Confirm it against a real JOC file and see which of the sample description atom or the magic cookie CoreMedia fills.
 3. **Audio fallback codec inside fMP4 HLS** for TrueHD/DTS: test which multichannel formats AVPlayer accepts.
 4. **MPVKit** packaging and licensing: confirm it's maintained and that an LGPL build is available.
-5. **"Dolby Vision" naming in the UI:** same trademark concern as Atmos. Options: keep "Dolby Vision" (descriptive, commonly done) or use a neutral badge like "DV" / "HDR · Vision". **Decision needed** before milestone 1.9.
+5. **"Dolby Vision" naming in the UI:** same trademark concern as Atmos. **Decided in 1.9: keep "Dolby Vision"**, as a descriptive name of the format (the info panel adds the profile, e.g. "Dolby Vision 8.1"). It is written once, in `HDRFormat.badge`, so switching to a neutral label such as "DV" is a one-line change. "Dolby Atmos" stays out of all user-facing text (a test checks the badges and info panel).
 6. **Name check:** "Halation" may be used by other apps (for example photo filter apps). Search the App Store and trademarks before publishing anything public.
 7. **License for Halation itself:** MIT (with LGPL dependencies) vs GPLv3 (would allow borrowing from IINA/mpv GPL code). **Decision needed** before phase 3.
 

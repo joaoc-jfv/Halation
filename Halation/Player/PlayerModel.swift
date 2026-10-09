@@ -34,6 +34,9 @@ final class PlayerModel {
     private(set) var resumeOffer: ResumeOffer?
     private(set) var isPictureInPictureAvailable = false
     private(set) var isPictureInPictureActive = false
+    private(set) var isHDRPlaybackEligible = false
+    private(set) var showsInfoPanel = false
+    private(set) var scrubPreview: ScrubPreview?
 
     var chapters: [Chapter] { mediaInfo?.chapters ?? [] }
     var currentChapter: Chapter? {
@@ -46,6 +49,19 @@ final class PlayerModel {
     }
 
     var recentFiles: RecentFiles { services.recents }
+
+    /// The HUD pill: `["4K", "HDR10", "Spatial Audio"]`.
+    var formatBadges: [String] {
+        mediaInfo?.formatBadges(spatialAudio: selectedAudio?.isSpatial == true && audioOutputMode == .spatial) ?? []
+    }
+
+    var infoSections: [InfoSection] {
+        guard let info = mediaInfo else { return [] }
+        return InfoSections.build(
+            fileName: currentURL?.lastPathComponent ?? displayTitle, info: info, audio: selectedAudio,
+            outputMode: audioOutputMode, isHDRPlaybackEligible: isHDRPlaybackEligible, rate: rate
+        )
+    }
 
     var isPlaying: Bool { state == .playing }
     var hasMedia: Bool { currentURL != nil }
@@ -63,6 +79,8 @@ final class PlayerModel {
     @ObservationIgnored private var resumeOfferTask: Task<Void, Never>?
     @ObservationIgnored private var artworkTask: Task<Void, Never>?
     @ObservationIgnored private var lastResumeSave: ContinuousClock.Instant?
+    @ObservationIgnored private var scrubTask: Task<Void, Never>?
+    @ObservationIgnored private var scrubThumbnails: [Int: CGImage] = [:]
     @ObservationIgnored private var sidecarTask: Task<Void, Never>?
     @ObservationIgnored private var engine: (any PlaybackEngine)?
     @ObservationIgnored private var openTask: Task<Void, Never>?
@@ -145,6 +163,7 @@ final class PlayerModel {
         engine.audioOutputMode = audioOutputMode
         engine.stretchesVideoToFrame = videoLayout.aspect != .auto
         isPictureInPictureAvailable = engine.isPictureInPictureAvailable
+        isHDRPlaybackEligible = engine.isHDRPlaybackEligible
         eventTask = Task { [weak self] in
             for await event in engine.events {
                 self?.handle(event)
@@ -160,6 +179,10 @@ final class PlayerModel {
         services.sleep.setActive(false)
         services.nowPlaying.clear()
         lastResumeSave = nil
+        scrubTask?.cancel()
+        scrubPreview = nil
+        scrubThumbnails = [:]
+        showsInfoPanel = false
         isPictureInPictureAvailable = false
         isPictureInPictureActive = false
         sidecarTask?.cancel()
@@ -264,7 +287,9 @@ final class PlayerModel {
 
     // MARK: Controls visibility
 
-    private var shouldKeepControlsVisible: Bool { !isPlaying || isPointerOverControls || activePanel != nil }
+    private var shouldKeepControlsVisible: Bool {
+        !isPlaying || isPointerOverControls || activePanel != nil || showsInfoPanel
+    }
 
     /// Call on mouse movement or any key. Shows the controls and restarts the auto-hide countdown.
     func registerActivity() {
@@ -352,6 +377,76 @@ final class PlayerModel {
             let image = await engine.thumbnail(at: time, maxSize: CGSize(width: 640, height: 640))
             guard !Task.isCancelled else { return }
             services.nowPlaying.setArtwork(image)
+            if let image, let url = currentURL { services.thumbnails.save(image, for: url) }
+        }
+    }
+
+    // MARK: Info panel, scrub previews and recents
+
+    func toggleInfoPanel() {
+        showsInfoPanel.toggle()
+        registerActivity()
+    }
+
+    /// Closes whatever Esc should close: an open panel first, then the info panel. Returns whether anything closed.
+    @discardableResult
+    func dismissTopmostOverlay() -> Bool {
+        if activePanel != nil {
+            closePanel()
+            return true
+        }
+        if showsInfoPanel {
+            showsInfoPanel = false
+            registerActivity()
+            return true
+        }
+        return false
+    }
+
+    /// Pointer over the scrubber at `fraction` of the way along (nil when it leaves).
+    func updateScrubPreview(fraction: Double?) {
+        scrubTask?.cancel()
+        guard let fraction, duration > .zero, let engine else {
+            scrubPreview = nil
+            return
+        }
+        let clamped = min(max(fraction, 0), 1)
+        let time = Duration.seconds(clamped * duration.seconds)
+        // Thumbnails come from nearby keyframes, so a coarse grid loses nothing and keeps the cache small.
+        let step = max(2, duration.seconds / 120)
+        let bucket = Int((time.seconds / step).rounded())
+        let cached = scrubThumbnails[bucket]
+        scrubPreview = ScrubPreview(fraction: clamped, time: time, image: cached ?? scrubPreview?.image)
+        guard cached == nil else { return }
+        scrubTask = Task {
+            let image = await engine.thumbnail(at: .seconds(Double(bucket) * step), maxSize: CGSize(width: 320, height: 180))
+            guard !Task.isCancelled, let image else { return }
+            if scrubThumbnails.count > 200 { scrubThumbnails = [:] }
+            scrubThumbnails[bucket] = image
+            scrubPreview?.image = image
+        }
+    }
+
+    func recentPoster(for entry: RecentEntry) -> NSImage? {
+        services.thumbnails.image(forPath: entry.path)
+    }
+
+    /// How far through the file the saved position is, 0...1, for the welcome screen's progress bars.
+    func recentProgress(for entry: RecentEntry) -> Double? {
+        guard let record = services.resume.record(for: URL(fileURLWithPath: entry.path)), record.duration > 0 else { return nil }
+        return min(max(record.position / record.duration, 0), 1)
+    }
+
+    func removeRecent(_ entry: RecentEntry) {
+        services.recents.remove(entry)
+        services.thumbnails.remove(forPath: entry.path)
+    }
+
+    func openRecent(_ entry: RecentEntry) {
+        if let url = services.recents.resolve(entry) {
+            open(url)
+        } else {
+            removeRecent(entry)
         }
     }
 
@@ -555,6 +650,13 @@ final class PlayerModel {
         }
         refreshTracks()
     }
+}
+
+/// The thumbnail and time shown above the scrubber while the pointer is on it.
+struct ScrubPreview {
+    var fraction: Double
+    var time: Duration
+    var image: CGImage?
 }
 
 enum PlayerPanel: Equatable {

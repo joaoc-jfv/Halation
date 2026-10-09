@@ -37,6 +37,9 @@ protocol PlaybackEngine: AnyObject {
     /// A still from around `time`, no larger than `maxSize`, for artwork and scrub previews. Nil if none could be made.
     func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage?
 
+    /// Whether this Mac's display and setup can currently show HDR (it can change when displays do).
+    var isHDRPlaybackEligible: Bool { get }
+
     /// Whether the system can show this engine's video in a floating Picture in Picture window.
     var isPictureInPictureAvailable: Bool { get }
     func togglePictureInPicture()

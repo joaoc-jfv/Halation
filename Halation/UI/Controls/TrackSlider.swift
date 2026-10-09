@@ -13,6 +13,8 @@ struct TrackSlider: View {
     @Binding var dragValue: Double?
     var label: LocalizedStringKey
     var valueDescription: String
+    /// Where the pointer is along the slider (0...1), or nil once it leaves.
+    var onHoverFraction: (Double?) -> Void = { _ in }
     /// Called on every drag update.
     var onChange: (Double) -> Void = { _ in }
     /// Called with the final value when the drag ends.
@@ -66,7 +68,16 @@ struct TrackSlider: View {
                         onCommit(fraction)
                     }
             )
-            .onHover { isHovering = $0 }
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    isHovering = true
+                    onHoverFraction(min(max(location.x / max(width, 1), 0), 1))
+                case .ended:
+                    isHovering = false
+                    onHoverFraction(nil)
+                }
+            }
             .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isActive)
         }
         .frame(height: 24)

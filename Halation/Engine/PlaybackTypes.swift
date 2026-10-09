@@ -95,6 +95,9 @@ struct MediaInfo: Equatable, Sendable {
     /// Size the picture is meant to be shown at: `resolution` with pixel aspect ratio and clean aperture applied.
     var displaySize: CGSize?
     var frameRate: Double?
+    /// Raw CoreMedia names, shown through `ColorDescription`.
+    var colorPrimaries: String?
+    var transferFunction: String?
     /// Sum of the tracks' estimated data rates, in bits per second.
     var bitrate: Double?
     /// The file's own title metadata, if it has any.

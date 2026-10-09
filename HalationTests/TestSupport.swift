@@ -17,11 +17,14 @@ extension PlayerServices {
         nowPlaying: NullNowPlaying = NullNowPlaying(),
         sleep: FakeSleepPrevention = FakeSleepPrevention(),
         resume: ResumeStore = ResumeStore(defaults: throwawayDefaults()),
-        recents: RecentFiles = RecentFiles(defaults: throwawayDefaults())
+        recents: RecentFiles = RecentFiles(defaults: throwawayDefaults()),
+        thumbnails: ThumbnailCache = ThumbnailCache(
+            directory: FileManager.default.temporaryDirectory.appendingPathComponent("halation-posters-\(UUID().uuidString)")
+        )
     ) -> PlayerServices {
         PlayerServices(
             preferences: preferences, folderAccess: FolderAccess(defaults: throwawayDefaults()),
-            nowPlaying: nowPlaying, resume: resume, recents: recents, sleep: sleep
+            nowPlaying: nowPlaying, resume: resume, recents: recents, sleep: sleep, thumbnails: thumbnails
         )
     }
 }
@@ -41,6 +44,8 @@ final class FakeEngine: PlaybackEngine {
     var duration: Duration = .seconds(1000)
     var currentTime: Duration = .zero
     var isPictureInPictureAvailable = true
+    var isHDRPlaybackEligible = true
+    private(set) var thumbnailRequests: [Duration] = []
     private(set) var isPlaying = false
     private(set) var seeks: [Duration] = []
     private(set) var closed = false
@@ -83,7 +88,10 @@ final class FakeEngine: PlaybackEngine {
     func step(frames: Int) {}
     func selectAudio(_ track: MediaTrack?) { selectedAudioTrack = track }
     func selectSubtitle(_ track: MediaTrack?) { selectedSubtitleTrack = track }
-    func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage? { thumbnailImage }
+    func thumbnail(at time: Duration, maxSize: CGSize) async -> CGImage? {
+        thumbnailRequests.append(time)
+        return thumbnailImage
+    }
     func togglePictureInPicture() {
         pictureInPictureToggles += 1
         emit(.pictureInPictureChanged(pictureInPictureToggles % 2 == 1))

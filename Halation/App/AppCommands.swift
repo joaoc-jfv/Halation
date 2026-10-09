@@ -30,9 +30,12 @@ struct AppCommands: Commands {
         CommandGroup(after: .toolbar) {
             Button("Toggle Full Screen") { NSApp.keyWindow?.toggleFullScreen(nil) }
                 .keyboardShortcut("f", modifiers: [])
+            Button(player.showsInfoPanel ? "Hide Info" : "Show Info") { player.toggleInfoPanel() }
+                .keyboardShortcut("i", modifiers: [])
+                .disabled(!player.hasMedia)
             // Esc itself is handled by the player view (it must also leave full screen).
-            Button("Close Panel") { player.closePanel() }
-                .disabled(player.activePanel == nil)
+            Button("Close Panel") { player.dismissTopmostOverlay() }
+                .disabled(player.activePanel == nil && !player.showsInfoPanel)
         }
 
         CommandMenu("Playback") {

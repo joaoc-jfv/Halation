@@ -5,6 +5,7 @@ struct PlayerWindowView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var windowController = WindowController()
     @FocusState private var isFocused: Bool
+    @State private var isDropTargeted = false
 
     private var showsControls: Bool { player.hasMedia && player.errorMessage == nil }
 
@@ -22,7 +23,7 @@ struct PlayerWindowView: View {
                 SubtitleOverlay()
             }
             if !showsControls {
-                EmptyStateView()
+                WelcomeView(isDropTargeted: isDropTargeted)
             }
             if showsControls {
                 if player.activePanel != nil {
@@ -45,11 +46,7 @@ struct PlayerWindowView: View {
         .onAppear { isFocused = true }
         // Esc closes an open panel first, and otherwise leaves full screen as usual.
         .onExitCommand {
-            if player.activePanel != nil {
-                player.closePanel()
-            } else {
-                windowController.exitFullScreen()
-            }
+            if !player.dismissTopmostOverlay() { windowController.exitFullScreen() }
         }
         .onContinuousHover { phase in
             if case .active = phase { player.registerActivity() }
@@ -62,7 +59,7 @@ struct PlayerWindowView: View {
             guard let url = urls.first else { return false }
             player.open(url)
             return true
-        }
+        } isTargeted: { isDropTargeted = $0 }
     }
 
     /// The bottom gradient keeps the glass readable over bright HDR highlights. It only exists
@@ -75,7 +72,7 @@ struct PlayerWindowView: View {
                 .allowsHitTesting(false)
             ControlsOverlay { windowController.toggleFullScreen() }
                 .frame(maxHeight: .infinity, alignment: .bottom)
-            FormatBadges()
+            InfoHUD()
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
                 .padding(.top, 24)
                 .padding(.trailing, 20)
@@ -102,24 +99,6 @@ struct PlayerWindowView: View {
         .padding(.top, 28)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: player.toast)
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.2), value: player.resumeOffer)
-    }
-}
-
-private struct EmptyStateView: View {
-    @Environment(PlayerModel.self) private var player
-
-    var body: some View {
-        VStack(spacing: 12) {
-            Text(player.errorMessage ?? "Drop a video to play")
-                .font(.title3)
-            Button("Open…") {
-                OpenPanel.chooseVideo { player.open($0) }
-            }
-        }
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, 28)
-        .padding(.vertical, 20)
-        .glassEffect(.regular, in: .rect(cornerRadius: 24))
     }
 }
 

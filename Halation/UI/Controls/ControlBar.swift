@@ -79,10 +79,16 @@ struct ControlBar: View {
             label: "Playback position",
             valueDescription: "\(player.currentTime.clockString) of \(player.duration.clockString)"
                 + (player.currentChapter.map { ", chapter: \($0.title)" } ?? ""),
+            onHoverFraction: { player.updateScrubPreview(fraction: $0) },
             onCommit: { player.seek(to: .seconds($0 * durationSeconds), precise: true) },
             onAdjust: { player.skip(by: .seconds(Double($0) * 5)) }
         )
         .frame(minWidth: 90)
+        .overlay(alignment: .topLeading) {
+            if let preview = player.scrubPreview {
+                ScrubPreviewView(preview: preview, chapter: ChapterNavigation.index(at: preview.time, in: player.chapters).map { player.chapters[$0].title })
+            }
+        }
     }
 
     private func volume(compact: Bool) -> some View {

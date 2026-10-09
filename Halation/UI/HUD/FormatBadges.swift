@@ -12,21 +12,3 @@ struct SpatialAudioBadge: View {
             .background(.white.opacity(0.2), in: .capsule)
     }
 }
-
-/// Top-right badges shown with the controls. The full info HUD arrives in milestone 1.9.
-struct FormatBadges: View {
-    @Environment(PlayerModel.self) private var player
-
-    private var showsSpatialAudio: Bool {
-        player.selectedAudio?.isSpatial == true && player.audioOutputMode == .spatial
-    }
-
-    var body: some View {
-        if showsSpatialAudio {
-            SpatialAudioBadge()
-                .padding(.horizontal, 6)
-                .padding(.vertical, 4)
-                .glassEffect(.regular, in: .capsule)
-        }
-    }
-}

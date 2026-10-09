@@ -155,6 +155,8 @@ final class AVFoundationEngine: PlaybackEngine {
         return try? await generator.image(at: time.cmTime).image
     }
 
+    var isHDRPlaybackEligible: Bool { AVPlayer.eligibleForHDRPlayback }
+
     var isPictureInPictureAvailable: Bool { pip != nil }
 
     func togglePictureInPicture() {
@@ -356,6 +358,14 @@ final class AVFoundationEngine: PlaybackEngine {
                 info.displaySize = info.resolution
             }
             info.frameRate = frameRate > 0 ? Double(frameRate) : nil
+            if let description = formats.first {
+                info.colorPrimaries = CMFormatDescriptionGetExtension(
+                    description, extensionKey: kCMFormatDescriptionExtension_ColorPrimaries
+                ) as? String
+                info.transferFunction = CMFormatDescriptionGetExtension(
+                    description, extensionKey: kCMFormatDescriptionExtension_TransferFunction
+                ) as? String
+            }
             info.videoCodec = formats.first.map { CodecNames.displayName(forFourCC: $0.mediaSubType.rawValue) }
             info.hdr = formats.first.map(HDRDetection.format(of:)) ?? .sdr
             bitrate += Double(dataRate)
