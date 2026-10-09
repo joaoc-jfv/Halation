@@ -11,7 +11,7 @@ enum TestVideo {
     ///   all in one alternate group so they show up as selectable audio options.
     static func make(
         seconds: Int = 2, fps: Int = 10, size: CGSize = CGSize(width: 320, height: 240),
-        flavor: Flavor = .sdrH264, audioLanguages: [String] = []
+        flavor: Flavor = .sdrH264, audioLanguages: [String] = [], pixelAspectRatio: (horizontal: Int, vertical: Int)? = nil
     ) async throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("halation-\(UUID().uuidString).mp4")
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
@@ -30,6 +30,14 @@ enum TestVideo {
             settings[AVVideoCompressionPropertiesKey] = [
                 AVVideoProfileLevelKey: kVTProfileLevel_HEVC_Main10_AutoLevel as String,
             ]
+        }
+        if let pixelAspectRatio {
+            var compression = settings[AVVideoCompressionPropertiesKey] as? [String: Any] ?? [:]
+            compression[AVVideoPixelAspectRatioKey] = [
+                AVVideoPixelAspectRatioHorizontalSpacingKey: pixelAspectRatio.horizontal,
+                AVVideoPixelAspectRatioVerticalSpacingKey: pixelAspectRatio.vertical,
+            ]
+            settings[AVVideoCompressionPropertiesKey] = compression
         }
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         let adaptor = AVAssetWriterInputPixelBufferAdaptor(

@@ -27,6 +27,11 @@ final class AVFoundationEngine: PlaybackEngine {
     private(set) var audioTracks: [MediaTrack] = []
     private(set) var subtitleTracks: [MediaTrack] = []
 
+    var stretchesVideoToFrame: Bool {
+        get { surface.videoGravity == .resize }
+        set { surface.videoGravity = newValue ? .resize : .resizeAspect }
+    }
+
     var audioOutputMode: AudioOutputMode = .spatial {
         didSet { applyAudioOutputMode() }
     }
@@ -310,8 +315,22 @@ final class AVFoundationEngine: PlaybackEngine {
             let (size, transform, frameRate, dataRate, formats) = try await video.load(
                 .naturalSize, .preferredTransform, .nominalFrameRate, .estimatedDataRate, .formatDescriptions
             )
-            let oriented = CGRect(origin: .zero, size: size).applying(transform)
-            info.resolution = CGSize(width: abs(oriented.width), height: abs(oriented.height))
+            // The track's naturalSize is the *display* size (the header carries the pixel aspect ratio),
+            // so the coded size comes from the format description.
+            func oriented(_ size: CGSize) -> CGSize {
+                let rect = CGRect(origin: .zero, size: size).applying(transform)
+                return CGSize(width: abs(rect.width), height: abs(rect.height))
+            }
+            if let description = formats.first {
+                let coded = CMVideoFormatDescriptionGetDimensions(description)
+                info.resolution = oriented(CGSize(width: Int(coded.width), height: Int(coded.height)))
+                info.displaySize = oriented(CMVideoFormatDescriptionGetPresentationDimensions(
+                    description, usePixelAspectRatio: true, useCleanAperture: true
+                ))
+            } else {
+                info.resolution = oriented(size)
+                info.displaySize = info.resolution
+            }
             info.frameRate = frameRate > 0 ? Double(frameRate) : nil
             info.videoCodec = formats.first.map { CodecNames.displayName(forFourCC: $0.mediaSubType.rawValue) }
             info.hdr = formats.first.map(HDRDetection.format(of:)) ?? .sdr

@@ -15,8 +15,20 @@ struct ControlBar: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            transportButtons
+        // On a narrow window the compact variant drops the skip buttons and the volume slider.
+        ViewThatFits(in: .horizontal) {
+            content(compact: false)
+            content(compact: true)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .glassEffect(.regular.tint(.black.opacity(0.3)).interactive(), in: .capsule)
+        .glassEffectID("bar", in: namespace)
+    }
+
+    private func content(compact: Bool) -> some View {
+        HStack(spacing: 8) {
+            transportButtons(compact: compact)
             timeLabel(elapsed.clockString)
             scrubber
             Button { showsTotal.toggle() } label: {
@@ -26,28 +38,29 @@ struct ControlBar: View {
             .accessibilityLabel(showsTotal ? "Total time" : "Time remaining")
             .accessibilityValue(showsTotal ? player.duration.clockString : (player.duration - elapsed).clockString)
             .accessibilityHint("Switches between total and remaining time")
-            volume
+            volume(compact: compact)
             ControlButton(
-                symbol: "captions.bubble",
-                label: "Audio and Subtitles",
+                symbol: "captions.bubble", label: "Audio and Subtitles",
                 isActive: player.activePanel == .audioSubtitles
             ) { player.togglePanel(.audioSubtitles) }
-            speedMenu
+            ControlButton(
+                symbol: "crop", label: "Crop and Aspect Ratio",
+                isActive: player.activePanel == .crop || !player.videoLayout.isDefault
+            ) { player.togglePanel(.crop) }
+            speedButton
             ControlButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Full Screen", action: onToggleFullScreen)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
-        .glassEffect(.regular.tint(.black.opacity(0.3)).interactive(), in: .capsule)
-        .glassEffectID("bar", in: namespace)
     }
 
-    private var transportButtons: some View {
+    private func transportButtons(compact: Bool) -> some View {
         HStack(spacing: 2) {
             ControlButton(symbol: player.isPlaying ? "pause.fill" : "play.fill", label: player.isPlaying ? "Pause" : "Play") {
                 player.togglePlayPause()
             }
-            ControlButton(symbol: "gobackward.10", label: "Skip Back 10 Seconds") { player.skip(by: .seconds(-10)) }
-            ControlButton(symbol: "goforward.10", label: "Skip Forward 10 Seconds") { player.skip(by: .seconds(10)) }
+            if !compact {
+                ControlButton(symbol: "gobackward.10", label: "Skip Back 10 Seconds") { player.skip(by: .seconds(-10)) }
+                ControlButton(symbol: "goforward.10", label: "Skip Forward 10 Seconds") { player.skip(by: .seconds(10)) }
+            }
         }
     }
 
@@ -61,44 +74,42 @@ struct ControlBar: View {
             onCommit: { player.seek(to: .seconds($0 * durationSeconds), precise: true) },
             onAdjust: { player.skip(by: .seconds(Double($0) * 5)) }
         )
-        .frame(minWidth: 120)
+        .frame(minWidth: 90)
     }
 
-    private var volume: some View {
+    private func volume(compact: Bool) -> some View {
         HStack(spacing: 2) {
             ControlButton(
                 symbol: player.isMuted || player.volume == 0 ? "speaker.slash.fill" : "speaker.wave.2.fill",
                 label: player.isMuted ? "Unmute" : "Mute"
             ) { player.toggleMute() }
-            TrackSlider(
-                value: player.isMuted ? 0 : Double(player.volume),
-                dragValue: $volumeDrag,
-                label: "Volume",
-                valueDescription: "\(Int((player.volume * 100).rounded())) percent",
-                onChange: { player.setVolume(Float($0)) },
-                onAdjust: { player.setVolume(player.volume + Float($0) * 0.05) }
-            )
-            .frame(width: 64)
+            if !compact {
+                TrackSlider(
+                    value: player.isMuted ? 0 : Double(player.volume),
+                    dragValue: $volumeDrag,
+                    label: "Volume",
+                    valueDescription: "\(Int((player.volume * 100).rounded())) percent",
+                    onChange: { player.setVolume(Float($0)) },
+                    onAdjust: { player.setVolume(player.volume + Float($0) * 0.05) }
+                )
+                .frame(width: 64)
+            }
         }
     }
 
-    private var speedMenu: some View {
-        Menu {
-            ForEach(PlaybackSpeed.presets, id: \.self) { speed in
-                Toggle(PlaybackSpeed.label(for: speed), isOn: Binding(
-                    get: { player.rate == speed },
-                    set: { _ in player.setRate(speed) }
-                ))
-            }
-        } label: {
-            Text(PlaybackSpeed.label(for: player.rate)).monospacedDigit()
+    private var speedButton: some View {
+        Button { player.togglePanel(.speed) } label: {
+            Text(PlaybackSpeed.label(for: player.rate))
+                .font(.callout.monospacedDigit().weight(.semibold))
+                .foregroundStyle(.white)
+                .frame(minWidth: 38, minHeight: 30)
+                .background(.white.opacity(player.activePanel == .speed ? 0.25 : 0), in: .capsule)
+                .contentShape(Capsule())
         }
-        .menuStyle(.button)
         .buttonStyle(.plain)
-        .menuIndicator(.hidden)
-        .fixedSize()
         .accessibilityLabel("Playback Speed")
         .accessibilityValue(PlaybackSpeed.label(for: player.rate))
+        .accessibilityAddTraits(player.activePanel == .speed ? .isSelected : [])
     }
 
     private func timeLabel(_ text: String) -> some View {

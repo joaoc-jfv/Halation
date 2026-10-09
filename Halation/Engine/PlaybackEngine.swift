@@ -34,6 +34,10 @@ protocol PlaybackEngine: AnyObject {
     /// `nil` turns subtitles off.
     func selectSubtitle(_ track: MediaTrack?)
 
+    /// `true` stretches the picture to fill the video view's frame (an aspect-ratio override);
+    /// `false` keeps its own aspect ratio inside the frame.
+    var stretchesVideoToFrame: Bool { get set }
+
     var audioOutputMode: AudioOutputMode { get set }
     var capabilities: EngineCapabilities { get }
     func close()

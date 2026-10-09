@@ -7,7 +7,10 @@ struct SubtitleOverlay: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let rect = SubtitleLayout.videoRect(in: geometry.size, videoSize: player.mediaInfo?.resolution)
+            // Subtitles belong to the visible picture, so they follow crops and zoom.
+            let rect = VideoGeometry.placement(
+                container: geometry.size, videoSize: player.mediaInfo?.presentationSize, layout: player.videoLayout
+            ).clipRect
             let style = player.subtitles.style
             let bottom = SubtitleLayout.bottomInset(
                 videoRect: rect, container: geometry.size, style: style, controlsVisible: player.controlsVisible

@@ -371,14 +371,6 @@ private func cue(_ start: Double, _ end: Double, _ text: String = "x") -> Subtit
         #expect(style.fontSize(forVideoHeight: 10) == 12)  // never unreadably small
     }
 
-    @Test func videoRectLetterboxes() {
-        let wide = SubtitleLayout.videoRect(in: CGSize(width: 1000, height: 1000), videoSize: CGSize(width: 1920, height: 1080))
-        #expect(abs(wide.minY - 218.75) < 0.001 && abs(wide.height - 562.5) < 0.001 && abs(wide.minX) < 0.001 && abs(wide.width - 1000) < 0.001)
-        let tall = SubtitleLayout.videoRect(in: CGSize(width: 1000, height: 500), videoSize: CGSize(width: 100, height: 100))
-        #expect(tall == CGRect(x: 250, y: 0, width: 500, height: 500))
-        #expect(SubtitleLayout.videoRect(in: CGSize(width: 800, height: 600), videoSize: nil) == CGRect(x: 0, y: 0, width: 800, height: 600))
-    }
-
     @Test func subtitlesLiftWhileControlsShow() {
         let container = CGSize(width: 1000, height: 600)
         let rect = CGRect(origin: .zero, size: container)

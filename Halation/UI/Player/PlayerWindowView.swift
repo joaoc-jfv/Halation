@@ -12,7 +12,11 @@ struct PlayerWindowView: View {
         ZStack {
             Color.black
             if let videoView = player.videoView {
-                VideoSurfaceView(videoView: videoView) { windowController.toggleFullScreen() }
+                VideoSurfaceView(
+                    videoView: videoView,
+                    videoSize: player.mediaInfo?.presentationSize,
+                    layout: player.videoLayout
+                ) { windowController.toggleFullScreen() }
             }
             if player.subtitles.selected != nil {
                 SubtitleOverlay()
@@ -31,7 +35,7 @@ struct PlayerWindowView: View {
         }
         .ignoresSafeArea()
         .background(WindowAccessor { windowController.configure($0) })
-        .onChange(of: player.mediaInfo?.resolution) { _, size in
+        .onChange(of: player.mediaInfo?.presentationSize) { _, size in
             if let size { windowController.fit(toVideoSize: size) }
         }
         .focusable()
@@ -123,10 +127,16 @@ private struct ControlsOverlay: View {
     var body: some View {
         GlassEffectContainer(spacing: 24) {
             VStack(spacing: 12) {
-                if player.activePanel == .audioSubtitles {
-                    TrackPanel()
-                        .glassEffectID("panel", in: glassNamespace)
-                        .glassEffectTransition(.matchedGeometry)
+                if let panel = player.activePanel {
+                    Group {
+                        switch panel {
+                        case .audioSubtitles: TrackPanel()
+                        case .crop: CropPanel()
+                        case .speed: SpeedPanel()
+                        }
+                    }
+                    .glassEffectID("panel", in: glassNamespace)
+                    .glassEffectTransition(.matchedGeometry)
                 }
                 ControlBar(namespace: glassNamespace, onToggleFullScreen: onToggleFullScreen)
             }

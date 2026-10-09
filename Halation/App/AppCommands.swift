@@ -50,6 +50,41 @@ struct AppCommands: Commands {
             .disabled(!player.hasMedia)
         }
 
+        CommandMenu("Video") {
+            Group {
+                Button("Next Crop Preset") { player.cycleCropByShortcut() }
+                    .keyboardShortcut("c", modifiers: [])
+                Menu("Crop") {
+                    ForEach(VideoLayout.Crop.allCases, id: \.self) { crop in
+                        Toggle(crop.label, isOn: Binding(
+                            get: { player.videoLayout.crop == crop },
+                            set: { _ in player.setCrop(crop) }
+                        ))
+                    }
+                }
+                Menu("Aspect Ratio") {
+                    ForEach(VideoLayout.Aspect.allCases, id: \.self) { aspect in
+                        Toggle(aspect.label, isOn: Binding(
+                            get: { player.videoLayout.aspect == aspect },
+                            set: { _ in player.setAspect(aspect) }
+                        ))
+                    }
+                }
+                Menu("Zoom") {
+                    ForEach(VideoLayout.Zoom.allCases, id: \.self) { zoom in
+                        Toggle(zoom.label, isOn: Binding(
+                            get: { player.videoLayout.zoom == zoom },
+                            set: { _ in player.setZoom(zoom) }
+                        ))
+                    }
+                }
+                Divider()
+                Button("Reset Video Adjustments") { player.resetVideoLayout() }
+                    .disabled(player.videoLayout.isDefault)
+            }
+            .disabled(!player.hasMedia)
+        }
+
         CommandMenu("Audio") {
             Group {
                 Button("Volume Up") { player.adjustVolumeByShortcut(by: 0.05) }

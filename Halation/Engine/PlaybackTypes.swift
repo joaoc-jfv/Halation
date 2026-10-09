@@ -82,10 +82,16 @@ struct MediaInfo: Equatable, Sendable {
     var hdr: HDRFormat = .sdr
     var videoCodec: String?
     var audioCodec: String?
+    /// Coded size with the rotation applied, e.g. 3840×2160.
     var resolution: CGSize?
+    /// Size the picture is meant to be shown at: `resolution` with pixel aspect ratio and clean aperture applied.
+    var displaySize: CGSize?
     var frameRate: Double?
     /// Sum of the tracks' estimated data rates, in bits per second.
     var bitrate: Double?
+
+    /// What layout code should use: the display size, or the coded size when that is unknown.
+    var presentationSize: CGSize? { displaySize ?? resolution }
 }
 
 extension Duration {

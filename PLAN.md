@@ -3,7 +3,7 @@
 > **Halation** (n.): the soft glow that forms around bright highlights on film.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core), 1.3 (video surface and window), 1.4 (Liquid Glass controls), 1.5 (tracks) and 1.6 (sidecar subtitles) are done; see §7 for the order of the rest.
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core), 1.3 (video surface and window), 1.4 (Liquid Glass controls), 1.5 (tracks), 1.6 (sidecar subtitles) and 1.7 (crop, aspect, speed) are done; see §7 for the order of the rest.
 
 ---
 
@@ -99,7 +99,7 @@ protocol PlaybackEngine: AnyObject {
 }
 ```
 
-Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/failed), `PlaybackError`, `PlaybackEvent` (state, time, duration, buffering, buffered range, media info, tracks changed), `MediaTrack` (id, kind, language, title, codec, channels, isDefault, isForced, `isSpatial`), `MediaInfo` (container, engine name, HDR format, codecs, resolution, frame rate, bitrate; audio layout and chapters join it in 1.5 and 1.8), `AudioOutputMode`, `EngineCapabilities`. `HDRFormat` (.sdr/.hdr10/.hdr10Plus/.hlg/.dolbyVision(profile, compatibilityID)) lives in `PlaybackTypes.swift`, and `CropMode` with the crop panel (1.7). An engine instance serves one file; `PlayerModel` creates a new one for each open and applies its stored rate, volume, mute and output mode.
+Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/failed), `PlaybackError`, `PlaybackEvent` (state, time, duration, buffering, buffered range, media info, tracks changed), `MediaTrack` (id, kind, language, title, codec, channels, isDefault, isForced, `isSpatial`), `MediaInfo` (container, engine name, HDR format, codecs, coded `resolution`, `displaySize` with pixel aspect ratio applied, frame rate, bitrate; audio layout and chapters join it in 1.5 and 1.8), `AudioOutputMode`, `EngineCapabilities`. `HDRFormat` (.sdr/.hdr10/.hdr10Plus/.hlg/.dolbyVision(profile, compatibilityID)) lives in `PlaybackTypes.swift`, and `CropMode` with the crop panel (1.7). An engine instance serves one file; `PlayerModel` creates a new one for each open and applies its stored rate, volume, mute and output mode.
 
 `PlayerModel` translates engine events into simple observable properties (`isPlaying`, `currentTime`, `duration`, `buffered`, `mediaInfo`, track lists, selected tracks) and holds UI-only state (controls visible, active panel, crop mode, external subtitle track).
 
@@ -144,12 +144,12 @@ Halation/
 │   │   ├── Remux/          (phase 2)
 │   │   └── MPV/            (phase 3)
 │   ├── Media/          CodecNames.swift, LanguageMatching.swift, MediaProbe.swift, HDRDetection.swift, AudioFormatDetection.swift
-│   ├── Player/         PlayerModel.swift, PlayerModel+Shortcuts.swift, TrackSelectionPolicy.swift, MediaTrack+Labels.swift, PlaybackSpeed.swift, Toast.swift, TimeFormatting.swift
+│   ├── Player/         PlayerModel.swift, PlayerModel+Shortcuts.swift, VideoLayout.swift, VideoGeometry.swift, TrackSelectionPolicy.swift, MediaTrack+Labels.swift, PlaybackSpeed.swift, Toast.swift, TimeFormatting.swift
 │   ├── Subtitles/      SubtitleCue.swift, SubtitleDecoding.swift, SRTParser.swift, WebVTTParser.swift, SubtitleMarkup.swift, SubtitleLoader.swift, SidecarSubtitles.swift, SubtitleStyle.swift, SubtitleTrackStore.swift
 │   ├── UI/
 │   │   ├── Player/     PlayerWindowView.swift, VideoSurfaceView.swift, WindowController.swift, WindowSizing.swift, OpenPanel.swift, SubtitleOverlay.swift, SubtitleLayout.swift
 │   │   ├── Settings/   SubtitleSettingsView.swift (⌘, window)
-│   │   ├── Controls/   ControlBar.swift, TrackSlider.swift (scrubber and volume), TrackPanel.swift, TrackPanel.swift, SpeedPanel.swift, CropPanel.swift, VolumeControl.swift
+│   │   ├── Controls/   ControlBar.swift, TrackSlider.swift (scrubber and volume), PanelRow.swift, TrackPanel.swift, CropPanel.swift, SpeedPanel.swift, TrackPanel.swift, SpeedPanel.swift, CropPanel.swift, VolumeControl.swift
 │   │   ├── HUD/        InfoHUD.swift, FormatBadges.swift (Spatial Audio badge so far), OSDToast.swift
 │   │   └── Welcome/    WelcomeView.swift (drop zone + recents)
 │   ├── Services/       NowPlayingService.swift, ResumeStore.swift, RecentFiles.swift, Preferences.swift, FolderAccess.swift, PiPController.swift
@@ -199,6 +199,7 @@ Halation/
   - Crop presets: None, 2.39:1, 2.00:1, 1.85:1, 16:9, 4:3. These remove letterbox bars by scaling the layer so the chosen region fills the view.
   - Zoom: fit (default), fill, and step zoom with pan (later).
 - `C` cycles through crop presets, with an on-screen toast showing the current mode.
+- Implementation notes (1.7): `VideoGeometry.placement` is a pure function from container size, display size and `VideoLayout` to a clip rect and a video rect. `VideoSurfaceView` puts the player view inside a masked clip view and sets the two frames, animated unless Reduce Motion is on. An aspect override stretches the picture (`videoGravity = .resize`) before any crop is taken from it. A crop takes a centered region of the chosen ratio (wider than the picture trims top and bottom, narrower trims the sides). **Fit** shows that whole region inside the window and **Fill** covers the window with it. Subtitles are placed in the clip rect. Layout is per file and resets when another file opens. Zoom steps and pan are still to do. The display size comes from the track's format description (pixel aspect ratio and clean aperture), because `naturalSize` already has the PAR in it.
 - Phase 4: automatic black-bar detection by sampling a few frames with `AVPlayerItemVideoOutput` at load time.
 
 ### 5.6 Playback speed
@@ -206,6 +207,7 @@ Halation/
 - Use `AVPlayerItem.audioTimePitchAlgorithm = .timeDomain` (or `.spectral`; test both for voice quality) so pitch stays natural.
 - `[` / `]` step speed down/up, `\` resets to 1×. Show a toast on change.
 - Use `AVPlayer.defaultRate` (macOS 13+) so pressing play resumes at the chosen speed.
+- The speed panel has the presets and a logarithmic fine slider (0.25× at the left, 1× in the middle, 4× at the right, in 0.05 steps).
 
 ### 5.7 Other basics (phase 1)
 - **Open:** drag and drop onto the window or Dock icon, File ▸ Open (⌘O), Open Recent, "Open With" from Finder. Declare document types in Info.plist: `public.movie`, `public.mpeg-4`, `com.apple.quicktime-movie`, `public.avi`, plus imported UTIs for `org.matroska.mkv` and `org.webmproject.webm`.

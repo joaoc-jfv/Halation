@@ -17,6 +17,7 @@ final class PlayerModel {
     private(set) var selectedAudio: MediaTrack?
     private(set) var selectedSubtitle: MediaTrack?
     private(set) var videoView: NSView?
+    private(set) var videoLayout = VideoLayout()
 
     private(set) var rate: Float = 1
     private(set) var volume: Float = 1
@@ -104,6 +105,7 @@ final class PlayerModel {
         engine.volume = volume
         engine.isMuted = isMuted
         engine.audioOutputMode = audioOutputMode
+        engine.stretchesVideoToFrame = videoLayout.aspect != .auto
         eventTask = Task { [weak self] in
             for await event in engine.events {
                 self?.handle(event)
@@ -120,6 +122,7 @@ final class PlayerModel {
         engine?.close()
         engine = nil
         videoView = nil
+        videoLayout = VideoLayout()
         scopedURL?.stopAccessingSecurityScopedResource()
         scopedURL = nil
         state = .idle
@@ -236,6 +239,21 @@ final class PlayerModel {
     private func cancelHideTimer() {
         hideTask?.cancel()
         hideTask = nil
+    }
+
+    // MARK: Crop, aspect and zoom
+
+    func setAspect(_ aspect: VideoLayout.Aspect) { updateLayout { $0.aspect = aspect } }
+    func setCrop(_ crop: VideoLayout.Crop) { updateLayout { $0.crop = crop } }
+    func setZoom(_ zoom: VideoLayout.Zoom) { updateLayout { $0.zoom = zoom } }
+    func resetVideoLayout() { updateLayout { $0 = VideoLayout() } }
+
+    private func updateLayout(_ change: (inout VideoLayout) -> Void) {
+        var layout = videoLayout
+        change(&layout)
+        guard layout != videoLayout else { return }
+        videoLayout = layout
+        engine?.stretchesVideoToFrame = layout.aspect != .auto
     }
 
     // MARK: Panels
@@ -404,4 +422,6 @@ final class PlayerModel {
 
 enum PlayerPanel: Equatable {
     case audioSubtitles
+    case crop
+    case speed
 }

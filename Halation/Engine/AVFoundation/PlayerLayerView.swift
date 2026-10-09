@@ -15,6 +15,11 @@ final class PlayerLayerView: NSView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+    var videoGravity: AVLayerVideoGravity {
+        get { playerLayer.videoGravity }
+        set { playerLayer.videoGravity = newValue }
+    }
+
     override func makeBackingLayer() -> CALayer { AVPlayerLayer() }
 
     private var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }

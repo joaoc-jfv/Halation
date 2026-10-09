@@ -86,6 +86,13 @@ extension PlayerModel {
         }
     }
 
+    /// `C`: None → 2.39:1 → 2.00:1 → 1.85:1 → 16:9 → 4:3 → None.
+    func cycleCropByShortcut() {
+        setCrop(videoLayout.crop.next)
+        showToast("Crop: \(videoLayout.crop.label)", symbol: "crop")
+        registerActivity()
+    }
+
     private func showVolumeToast() {
         if isMuted {
             showToast("Muted", symbol: "speaker.slash.fill")
