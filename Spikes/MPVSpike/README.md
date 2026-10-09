@@ -1,7 +1,7 @@
 # libmpv spike (phase 3)
 
 Throwaway experiment that answers: *can libmpv (MPVKit's LGPL build) play into an AppKit window on macOS 26, with
-hardware decoding and HDR, and is it light enough to be Halation's fallback engine?* Not part of the app target and not
+hardware decoding and HDR, and is it light enough to be Nit Picker's fallback engine?* Not part of the app target and not
 built by `xcodegen`. First `swift build` downloads about 1.9 GB of MPVKit binaries (every platform slice; the app only
 links the macOS one).
 

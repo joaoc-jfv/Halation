@@ -1,4 +1,4 @@
-name: Halation
+name: NitPicker
 options:
   bundleIdPrefix: com.joaocadide
   deploymentTarget:
@@ -14,20 +14,20 @@ packages:
   FFmpegKit:
     path: Packages/FFmpegKit
 targets:
-  Halation:
+  NitPicker:
     type: application
     platform: macOS
     sources:
-      - path: Halation
+      - path: NitPicker
         excludes:
           - Resources/Info.plist
     dependencies:
       - package: FFmpegKit
     info:
-      path: Halation/Resources/Info.plist
+      path: NitPicker/Resources/Info.plist
       properties:
-        CFBundleName: Halation
-        CFBundleDisplayName: Halation
+        CFBundleName: Nit Picker
+        CFBundleDisplayName: Nit Picker
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         LSMinimumSystemVersion: $(MACOSX_DEPLOYMENT_TARGET)
@@ -59,7 +59,7 @@ targets:
               public.mime-type: [video/webm]
     # Defined here, not in the file: XcodeGen rewrites the file from these properties.
     entitlements:
-      path: Halation/Resources/Halation.entitlements
+      path: NitPicker/Resources/NitPicker.entitlements
       properties:
         com.apple.security.app-sandbox: true
         com.apple.security.files.user-selected.read-only: true
@@ -70,8 +70,8 @@ targets:
         com.apple.security.network.client: true
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.joaocadide.halation
-        PRODUCT_NAME: Halation
+        PRODUCT_BUNDLE_IDENTIFIER: com.joaocadide.nitpicker
+        PRODUCT_NAME: NitPicker
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         ENABLE_HARDENED_RUNTIME: YES
         ENABLE_APP_SANDBOX: YES
@@ -79,29 +79,29 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         CODE_SIGN_STYLE: Automatic
         CODE_SIGN_IDENTITY: "-"
-  HalationTests:
+  NitPickerTests:
     type: bundle.unit-test
     platform: macOS
     sources:
-      - HalationTests
+      - NitPickerTests
     dependencies:
-      - target: Halation
+      - target: NitPicker
       - package: FFmpegKit
     settings:
       base:
-        PRODUCT_BUNDLE_IDENTIFIER: com.joaocadide.halation.tests
+        PRODUCT_BUNDLE_IDENTIFIER: com.joaocadide.nitpicker.tests
         GENERATE_INFOPLIST_FILE: YES
         BUNDLE_LOADER: $(TEST_HOST)
-        TEST_HOST: $(BUILT_PRODUCTS_DIR)/Halation.app/Contents/MacOS/Halation
+        TEST_HOST: $(BUILT_PRODUCTS_DIR)/NitPicker.app/Contents/MacOS/NitPicker
 schemes:
-  Halation:
+  NitPicker:
     build:
       targets:
-        Halation: all
-        HalationTests: [test]
+        NitPicker: all
+        NitPickerTests: [test]
     run:
       config: Debug
     test:
       config: Debug
       targets:
-        - HalationTests
+        - NitPickerTests

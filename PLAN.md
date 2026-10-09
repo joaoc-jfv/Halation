@@ -1,9 +1,9 @@
-# Halation — Project Plan
+# Nit Picker — Project Plan
 
-> **Halation** (n.): the soft glow that forms around bright highlights on film.
+> **Nit Picker**: a nit is the unit of display brightness, and a nit-picker is someone who fusses over small details. Renamed from the working title "Halation" (the soft glow around bright highlights on film) in October 2026.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** Phase 1 (milestones 1.1 to 1.10) is done, the phase 2 spike is done, and milestones 2.1 (FFmpeg, `MKVProbe`, loopback server), 2.2 (`RemuxEngine`) and 2.3 (MKV tracks and thumbnails) and 2.4 (audio conversion, files without Cues) and 3.1 (libmpv groundwork and the compatibility engine) are done. Phase 1: Halation plays MP4, MOV and M4V with everything in §5 and §6. MKV and the other containers are phases 2 and 3 (opening one shows "This format isn't supported yet.").
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** Phase 1 (milestones 1.1 to 1.10) is done, the phase 2 spike is done, and milestones 2.1 (FFmpeg, `MKVProbe`, loopback server), 2.2 (`RemuxEngine`) and 2.3 (MKV tracks and thumbnails) and 2.4 (audio conversion, files without Cues) and 3.1 (libmpv groundwork and the compatibility engine) are done. Phase 1: Nit Picker plays MP4, MOV and M4V with everything in §5 and §6. MKV and the other containers are phases 2 and 3 (opening one shows "This format isn't supported yet.").
 
 ---
 
@@ -30,8 +30,8 @@ This document is the full build plan. It is written so that an engineer (or anot
 
 ### To start a session
 1. Read `CLAUDE.md`, this section, §7 Phase 2, and `Spikes/MKVRemux/README.md`.
-2. `xcodegen generate && xcodebuild -scheme Halation -destination 'platform=macOS' test`. The first build downloads the FFmpeg binaries (~100 MB).
-3. `TestMedia/` (gitignored, never commit) holds one real file for manual checks: a 3840×1920 HEVC Dolby Vision profile 8.1 MKV, 55 minutes, 10.6 GB, two E-AC-3 5.1 JOC audio tracks (Italian first and default, then English), and 46 SRT subtitle tracks (including Forced and SDH). Open it with `open -a <built Halation.app> <file>`.
+2. `xcodegen generate && xcodebuild -scheme NitPicker -destination 'platform=macOS' test`. The first build downloads the FFmpeg binaries (~100 MB).
+3. `TestMedia/` (gitignored, never commit) holds one real file for manual checks: a 3840×1920 HEVC Dolby Vision profile 8.1 MKV, 55 minutes, 10.6 GB, two E-AC-3 5.1 JOC audio tracks (Italian first and default, then English), and 46 SRT subtitle tracks (including Forced and SDH). Open it with `open -a <built NitPicker.app> <file>`.
 
 ### Next: milestone 3.2 (the compatibility engine, finished)
 `MPVEngine` plays and is routed to (3.1). What it still lacks, in order:
@@ -46,22 +46,22 @@ This document is the full build plan. It is written so that an engineer (or anot
 - **Not verified by eye or ear (needs a person):** Dolby Vision actually switching the display into DV mode; how the JOC track sounds on AirPods; HDR brightness on screen. The data path (tags, sample entries, flags, pixel format) is verified.
 - Not verified by ear: that switching audio sounds right on AirPods (the owner reports Spatial Audio works). Not measured: how long the one-pass subtitle scan takes on a cold disk for the 10.6 GB file (subtitles were showing within seconds in the real app), and ASS styling beyond plain text (phase 3). Bitmap subtitles (PGS, VobSub) aren't read.
 - The sandbox's folder-access prompt for sidecar subtitles couldn't be exercised end to end (only its failure path is tested).
-- `Halation.app` is signed ad hoc, so Hardened Runtime is off; real signing, notarization and Sparkle are phase 4.
+- `NitPicker.app` is signed ad hoc, so Hardened Runtime is off; real signing, notarization and Sparkle are phase 4.
 
 ### Decisions that belong to the owner
-- **License for Halation: decided, MIT** (§9 item 7). Public repo, free for now; premium features may come later as a closed module (open core), which MIT allows because the owner holds the copyright. Don't copy GPL code (IINA, mpv) into the app, and stay on MPVKit's LGPL variant. Still open: the name check (§9 item 6).
+- **License for Nit Picker: decided, MIT** (§9 item 7). Public repo, free for now; premium features may come later as a closed module (open core), which MIT allows because the owner holds the copyright. Don't copy GPL code (IINA, mpv) into the app, and stay on MPVKit's LGPL variant. Still open: the name check (§9 item 6).
 - "Dolby Vision" is used as the descriptive name (decided in 1.9, one place: `HDRFormat.badge`). "Dolby Atmos" is never shown; a test checks it.
 - FFmpeg and libmpv come from MPVKit's release assets, whose README says it is lightly maintained. `Packages/FFmpegKit` now depends on the `MPVKit` package (LGPL variant, pinned to 1.1.0-n9.0.2) and links its static libraries explicitly. AetherEngine (a library that already does this whole job) is the fallback or reference.
 
 ### Gotchas learned the hard way
-- **`project.yml` is the source of truth** for the Xcode project, the Info.plist and the **entitlements**. XcodeGen rewrites `Halation.entitlements` from `entitlements.properties`; for milestones 1.1–1.5 it was regenerated empty and the app ran unsandboxed. Run `xcodegen generate` after adding or removing files.
+- **`project.yml` is the source of truth** for the Xcode project, the Info.plist and the **entitlements**. XcodeGen rewrites `NitPicker.entitlements` from `entitlements.properties`; for milestones 1.1–1.5 it was regenerated empty and the app ran unsandboxed. Run `xcodegen generate` after adding or removing files.
 - **Closures the system calls on its own queue** (MediaPlayer artwork and remote commands) must be created in a `nonisolated` function, or Swift 6 traps at run time. Fake services in tests can't catch this; launch the real app.
 - Sandbox: both `network.server` and `network.client` are needed for the loopback server (verified). The sandbox is enforced for network here.
 - AVFoundation can't describe HLS tracks (see 2.2 notes); `AVAssetResourceLoader` can't feed HLS media.
 - libavformat parses Matroska Cues lazily (first seek); the muxer needs `strict unofficial` for the Dolby Vision box and `delay_moov` for `dec3`. The details are in the spike README.
 - Linking FFmpeg statically needs its dependencies (gmp, gnutls, nettle, hogweed, dav1d, uavs3d, lcms2) linked explicitly in `Packages/FFmpegKit/Package.swift`.
 - Swift Testing runs tests in parallel; tests that touch `UserDefaults` use throwaway suites (`TestPreferences`, `PlayerServices.testing`). `FakeEngine` (tests) scripts a `PlaybackEngine`.
-- **Checking the real app**: `open -a <app> <file>`, then System Events scripting (`osascript`) for keys, menus and window geometry, `screencapture -R x,y,w,h` of the window, and `CGEvent` for real clicks (a tiny Swift tool; `System Events` clicks don't register as double-clicks). It only works while the Mac is unlocked. A stale "Halation quit unexpectedly" dialog after a crashing test run is harmless; check `~/Library/Logs/DiagnosticReports/Halation*.ips` for real crashes.
+- **Checking the real app**: `open -a <app> <file>`, then System Events scripting (`osascript`) for keys, menus and window geometry, `screencapture -R x,y,w,h` of the window, and `CGEvent` for real clicks (a tiny Swift tool; `System Events` clicks don't register as double-clicks). It only works while the Mac is unlocked. A stale "Nit Picker quit unexpectedly" dialog after a crashing test run is harmless; check `~/Library/Logs/DiagnosticReports/NitPicker*.ips` for real crashes.
 - Generated test media: `TestVideo.make` (AVAssetWriter) plus `MKVFixture` (FFmpeg remux into Matroska with chapters, subtitles, a Dolby Vision record) mean no media is committed.
 
 ---
@@ -177,9 +177,9 @@ Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/faile
 
 - **Language/UI:** Swift 6 (strict concurrency on), SwiftUI app lifecycle, AppKit bridging where needed (`NSViewRepresentable` for the video surface, `NSWindow` tweaks).
 - **Deployment target:** macOS 26.0 (Liquid Glass APIs). Dev machine runs macOS 27 / Xcode 27.
-- **Bundle ID:** `com.joaocadide.halation` (adjust if needed).
-- **Project generation:** [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`). Commit `project.yml`; gitignore the generated `Halation.xcodeproj`. This keeps the project file reviewable and lets a model regenerate it without using the Xcode GUI.
-- **Targets:** `Halation` (app), `HalationTests` (unit tests, Swift Testing), and later `HalationUITests` if needed.
+- **Bundle ID:** `com.joaocadide.nitpicker` (adjust if needed).
+- **Project generation:** [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`). Commit `project.yml`; gitignore the generated `NitPicker.xcodeproj`. This keeps the project file reviewable and lets a model regenerate it without using the Xcode GUI.
+- **Targets:** `NitPicker` (app), `NitPickerTests` (unit tests, Swift Testing), and later `NitPickerUITests` if needed.
 - **Dependencies:**
   - Phase 1: none (Apple frameworks only: AVFoundation, AVKit, CoreMedia, MediaPlayer, SwiftUI, AppKit).
   - Phase 2+: FFmpeg libraries (libavformat/libavcodec/libavutil) and later libmpv + libass. Preferred source: **MPVKit** (Swift package shipping libmpv, FFmpeg, and libass as xcframeworks). Pick its **LGPL** variant unless we decide to open-source under GPL. *Verify the current package name, maintenance status, and license variants before adding it.*
@@ -189,14 +189,14 @@ Supporting types: `PlaybackState` (idle/loading/ready/playing/paused/ended/faile
 ### Folder layout
 
 ```
-Halation/
+NitPicker/
 ├── PLAN.md
 ├── CLAUDE.md
 ├── README.md
 ├── project.yml
 ├── .gitignore
-├── Halation/
-│   ├── App/            HalationApp.swift, AppDelegate.swift, AppCommands.swift
+├── NitPicker/
+│   ├── App/            NitPickerApp.swift, AppDelegate.swift, AppCommands.swift
 │   ├── Engine/
 │   │   ├── PlaybackEngine.swift, PlaybackTypes.swift, EngineRouter.swift
 │   │   ├── AVFoundation/   AVFoundationEngine.swift, AVTrackMapping.swift, PlayerLayerView.swift, PiPController.swift
@@ -212,8 +212,8 @@ Halation/
 │   │   ├── HUD/        InfoHUD.swift, FormatBadges.swift (the Spatial Audio tag), OSDToast.swift
 │   │   └── Welcome/    WelcomeView.swift (drop zone + recents)
 │   ├── Services/       NowPlayingService.swift, ResumeStore.swift, RecentFiles.swift, ThumbnailCache.swift, SleepPrevention.swift, PlayerServices.swift, Preferences.swift, FolderAccess.swift
-│   └── Resources/      Assets.xcassets, Info.plist, Halation.entitlements
-└── HalationTests/
+│   └── Resources/      Assets.xcassets, Info.plist, NitPicker.entitlements
+└── NitPickerTests/
 ```
 
 ---
@@ -374,7 +374,7 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 - **Audio switching.** `RemuxEngine` lists every copyable audio track. Choosing one starts a new `RemuxSession` for that stream (reusing the probe), reloads the inner engine at the current time and resumes if it was playing (a brief gap; the engine remembers whether play was last requested and sets that state explicitly after the reload, because a new item inherits the player's rate). Several quick picks collapse into the last one; a failed switch keeps the old track. The playing track's Spatial flag comes from its init segment; the other E-AC-3 tracks are checked in the background by opening a throwaway muxer (`RemuxSession.detectSpatial`) and the list updates when it answers. HLS alternate renditions were not tried.
 - **Subtitles.** `MKVSubtitleReader` makes one pass over the file after playback starts and collects every text track at once (SubRip, ASS/SSA, WebVTT; ASS text is the part after the eighth comma, `\N` becomes a newline, vector drawings are dropped, overrides are stripped by `SubtitleMarkup`). Results arrive about once a second into a `SubtitleCueStore`. They are *not* routed through `SubtitleTrackStore`: the tracks are the engine's `subtitleTracks` (so forced/default flags, `TrackSelectionPolicy`, the remembered language, the S key and the menus work unchanged) and the new protocol method `PlaybackEngine.subtitleCues(for:)` hands the cues to `PlayerModel.activeSubtitleCues()`. `drawsSubtitles` decides whether the overlay and the delay controls apply, so Z/X delay works on MKV subtitles too. AVFoundation tracks keep rendering natively.
 - **Thumbnails.** `SegmentMuxer.stillClip(at:)` cuts the keyframe at or before the time (0.6 s, video only, not cached) into a standalone MP4; `RemuxEngine.thumbnail` writes it to a temp file and uses `AVAssetImageGenerator` on it. The muxer keeps the keyframe's place in the file as an empty edit, so the image is requested at the keyframe's own time, not at zero. This also gives MKV welcome posters and Now Playing artwork.
-- **HDR check of the remux path.** The display's EDR headroom rises from 1.2 to ~15 while the real file plays, and a dark shot cut from it renders at the same mean luma in QuickTime Player (29.0, plain MP4 from the spike tool), Halation playing that MP4 (28.9) and Halation playing the MKV (27.3), so the remux path looks like QuickTime's. The owner also confirmed by eye that HDR and Spatial Audio work. (`screencapture` tone-maps HDR, so those numbers show equivalence, not absolute brightness.)
+- **HDR check of the remux path.** The display's EDR headroom rises from 1.2 to ~15 while the real file plays, and a dark shot cut from it renders at the same mean luma in QuickTime Player (29.0, plain MP4 from the spike tool), Nit Picker playing that MP4 (28.9) and Nit Picker playing the MKV (27.3), so the remux path looks like QuickTime's. The owner also confirmed by eye that HDR and Spatial Audio work. (`screencapture` tone-maps HDR, so those numbers show equivalence, not absolute brightness.)
 - Test gotcha: `PlayerModel.seek` sets `currentTime` at once, so a test that waits on `model.currentTime` doesn't wait for the engine; use `model.livePlaybackTime()`.
 - The track panel's subtitle list now scrolls (max 320 pt), because a file can carry dozens of tracks.
 2.4 notes (done):
@@ -449,10 +449,10 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 1. **MKV → HLS remuxing (phase 2)**: the spike is done and the approach is confirmed for HEVC + Dolby Vision + E-AC-3 JOC (`Spikes/MKVRemux/README.md`). Sandbox behaviour of the loopback server is settled (2.1). Still open: Dolby Vision on a DV display, subtitles and audio fallbacks, files without Cues.
 2. **E-AC-3 JOC detection API:** no media characteristic exists, so the `dec3` parser (milestone 1.5) is the approach. Confirm it against a real JOC file and see which of the sample description atom or the magic cookie CoreMedia fills.
 3. **Audio fallback codec inside fMP4 HLS** for TrueHD/DTS: test which multichannel formats AVPlayer accepts.
-4. **MPVKit** packaging and licensing: an LGPL build exists (the plain `MPVKit` product, FFmpeg n9, static) and it released recently, but its README disclaims regular maintenance and points to AetherEngine for production. **Static LGPL linking** also means users must be able to relink the app with another FFmpeg, which is simplest if Halation is open source (see 7).
+4. **MPVKit** packaging and licensing: an LGPL build exists (the plain `MPVKit` product, FFmpeg n9, static) and it released recently, but its README disclaims regular maintenance and points to AetherEngine for production. **Static LGPL linking** also means users must be able to relink the app with another FFmpeg, which is simplest if Nit Picker is open source (see 7).
 5. **"Dolby Vision" naming in the UI:** same trademark concern as Atmos. **Decided in 1.9: keep "Dolby Vision"**, as a descriptive name of the format (the info panel adds the profile, e.g. "Dolby Vision 8.1"). It is written once, in `HDRFormat.badge`, so switching to a neutral label such as "DV" is a one-line change. "Dolby Atmos" stays out of all user-facing text (a test checks the badges and info panel).
-6. **Name check:** "Halation" may be used by other apps (for example photo filter apps). Search the App Store and trademarks before publishing anything public.
-7. **License for Halation itself:** **decided, MIT**, with the LGPL dependencies listed in `THIRD-PARTY-NOTICES.md` (the source is public, so the relinking duty is met). GPLv3 was rejected because it would block a future closed premium tier. Consequence: no copying of GPL code from IINA or mpv; reading it for ideas is fine.
+6. **Name check:** "Nit Picker" is a common English phrase, so search the App Store, GitHub and trademark registers for clashes before shipping a release. The repo is already public under this name.
+7. **License for Nit Picker itself:** **decided, MIT**, with the LGPL dependencies listed in `THIRD-PARTY-NOTICES.md` (the source is public, so the relinking duty is met). GPLv3 was rejected because it would block a future closed premium tier. Consequence: no copying of GPL code from IINA or mpv; reading it for ideas is fine.
 
 ---
 
@@ -467,6 +467,6 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 - Build and test from the command line:
   ```bash
   xcodegen generate
-  xcodebuild -scheme Halation -destination 'platform=macOS' build
-  xcodebuild -scheme Halation -destination 'platform=macOS' test
+  xcodebuild -scheme NitPicker -destination 'platform=macOS' build
+  xcodebuild -scheme NitPicker -destination 'platform=macOS' test
   ```

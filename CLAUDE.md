@@ -1,4 +1,4 @@
-# Halation
+# Nit Picker
 
 Free macOS video player (SwiftUI + Liquid Glass, macOS 26+) with HDR/Dolby Vision and Spatial Audio.
 
@@ -18,7 +18,7 @@ Free macOS video player (SwiftUI + Liquid Glass, macOS 26+) with HDR/Dolby Visio
 ## Commands
 ```bash
 xcodegen generate
-xcodebuild -scheme Halation -destination 'platform=macOS' build
-xcodebuild -scheme Halation -destination 'platform=macOS' test
+xcodebuild -scheme NitPicker -destination 'platform=macOS' build
+xcodebuild -scheme NitPicker -destination 'platform=macOS' test
 ```
 The MKV spike is a separate package: `cd Spikes/MKVRemux && swift build` (see its README).

@@ -1,6 +1,6 @@
-# Halation
+# Nit Picker
 
-A free macOS video player built for HDR highlights, Spatial Audio, and a Liquid Glass interface.
+A free macOS video player for people who care about every nit: HDR highlights, Spatial Audio, and a Liquid Glass interface.
 
 Requires macOS 26 or later. [PLAN.md](PLAN.md) holds the architecture, the feature specs and the roadmap.
 
@@ -41,8 +41,8 @@ Everything above is also in the menu bar. Subtitle appearance is in Settings (‚å
 ```bash
 brew install xcodegen
 xcodegen generate
-xcodebuild -scheme Halation -destination 'platform=macOS' build
-xcodebuild -scheme Halation -destination 'platform=macOS' test
+xcodebuild -scheme NitPicker -destination 'platform=macOS' build
+xcodebuild -scheme NitPicker -destination 'platform=macOS' test
 ```
 
 `project.yml` is the source of truth for the project, the Info.plist and the sandbox entitlements; the Xcode project is generated and not committed.

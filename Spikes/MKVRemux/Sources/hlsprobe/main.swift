@@ -157,7 +157,7 @@ final class LoopbackServer {
 final class Loader: NSObject, AVAssetResourceLoaderDelegate {
     let queue = DispatchQueue(label: "resource-loader")
     func resourceLoader(_ resourceLoader: AVAssetResourceLoader, shouldWaitForLoadingOfRequestedResource loadingRequest: AVAssetResourceLoadingRequest) -> Bool {
-        guard let url = loadingRequest.request.url, url.scheme == "halation-remux" else { return false }
+        guard let url = loadingRequest.request.url, url.scheme == "nitpicker-remux" else { return false }
         let path = url.lastPathComponent
         if redirectToFiles, redirectAll || !path.hasSuffix(".m3u8") {
             let fileURL = directory.appendingPathComponent(path)
@@ -205,7 +205,7 @@ func run() async -> Int32 {
         url = URL(string: "http://127.0.0.1:\(port)/\(entry)")!
         asset = AVURLAsset(url: url)
     } else {
-        url = URL(string: "halation-remux://stream/\(entry)")!
+        url = URL(string: "nitpicker-remux://stream/\(entry)")!
         asset = AVURLAsset(url: url)
         asset.resourceLoader.setDelegate(loader, queue: loader.queue)
     }
