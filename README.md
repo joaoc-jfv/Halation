@@ -4,6 +4,16 @@ A free macOS video player for people who care about every nit: HDR highlights, S
 
 Requires macOS 26 or later. [PLAN.md](PLAN.md) holds the architecture, the feature specs and the roadmap.
 
+## Download
+
+**[⬇ Download Nit Picker for Mac (NitPicker.dmg)](https://github.com/joaoc-jfv/NitPicker/releases/latest/download/NitPicker.dmg)** · [all releases](https://github.com/joaoc-jfv/NitPicker/releases)
+
+1. Open `NitPicker.dmg` and drag **Nit Picker** onto **Applications**.
+2. The first time, macOS will say it can't check the app for malware, because these early builds are not yet notarized by Apple. To open it anyway: try to open Nit Picker once, then go to **System Settings ▸ Privacy & Security**, scroll to the message about "Nit Picker" and click **Open Anyway**. You only need to do this once per download.
+3. Double-click a video, or drop one on the window. MP4, MOV, M4V, MKV and WebM open directly; everything else plays in compatibility mode.
+
+Works on Apple silicon and Intel Macs running macOS 26 or later. Prefer to build it yourself? See [Build](#build).
+
 ## What it does today
 
 - **Plays MP4, MOV and M4V** through AVFoundation, so HDR10, HLG and Dolby Vision reach the display as real EDR brightness, with no video composition or Core Image in the way.
