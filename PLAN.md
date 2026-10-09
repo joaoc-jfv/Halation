@@ -358,6 +358,7 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 - Keep all AVFoundation specifics inside `Engine/AVFoundation/` and `Media/`. The UI talks only to `PlayerModel`.
 - Use `@Observable` (not `ObservableObject`), `async`/`await` with AVFoundation's async `load(...)` APIs, and `@MainActor` for UI-touching types.
 - When an API in this plan is marked *verify*, check the current Apple docs or headers before relying on it. If reality differs from this plan, update this file in the same commit.
+- **Callbacks the system runs on its own queue** (MediaPlayer artwork and remote-command handlers, and the like) must be built in a `nonisolated` function. A closure written inside a `@MainActor` method is main-actor-isolated, and Swift 6 traps with a dispatch assertion when the system calls it from another queue. Tests that use fake services can't catch this, so check such paths by launching the real app. (`SystemNowPlaying.makeArtwork` and `.handler` follow this rule, and a test calls the artwork handler off the main thread.)
 - Build and test from the command line:
   ```bash
   xcodegen generate

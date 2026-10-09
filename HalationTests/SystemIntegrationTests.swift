@@ -222,6 +222,21 @@ private struct Harness {
         #expect(harness.nowPlaying.published.last?.rate == 1.5)
     }
 
+    /// MediaPlayer asks for the artwork on its own queue. A handler that was main-actor-isolated trapped there
+    /// and crashed the app on launch (a fake publisher in the other tests can't catch that).
+    @Test func artworkHandlerRunsOffTheMainThread() async throws {
+        let context = try #require(CGContext(data: nil, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 0,
+                                             space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        let image = try #require(context.makeImage())
+        let artwork = SystemNowPlaying.makeArtwork(image)
+        let size = await withCheckedContinuation { continuation in
+            DispatchQueue.global().async {
+                continuation.resume(returning: artwork.image(at: CGSize(width: 8, height: 8))?.size)
+            }
+        }
+        #expect(size == CGSize(width: 8, height: 8))
+    }
+
     @Test func fallsBackToTheFileNameForTheTitle() async {
         let harness = Harness()
         await harness.open()

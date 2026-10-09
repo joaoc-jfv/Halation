@@ -60,12 +60,15 @@ final class SystemNowPlaying: NowPlayingPublishing {
     }
 
     func setArtwork(_ image: CGImage?) {
-        artwork = image.map { image in
-            let size = CGSize(width: image.width, height: image.height)
-            // The system calls this from any thread, so it only captures the (immutable) image.
-            return MPMediaItemArtwork(boundsSize: size) { _ in NSImage(cgImage: image, size: size) }
-        }
+        artwork = image.map(Self.makeArtwork)
         if let lastInfo { publish(lastInfo) }
+    }
+
+    /// Built in a nonisolated function on purpose: MediaPlayer calls the request handler on its own queue,
+    /// and a closure written inside this main-actor class would be main-actor-isolated, which traps there.
+    nonisolated static func makeArtwork(_ image: CGImage) -> MPMediaItemArtwork {
+        let size = CGSize(width: image.width, height: image.height)
+        return MPMediaItemArtwork(boundsSize: size) { _ in NSImage(cgImage: image, size: size) }
     }
 
     func clear() {
@@ -83,34 +86,34 @@ final class SystemNowPlaying: NowPlayingPublishing {
         guard !isRegistered else { return }
         isRegistered = true
         let commands = MPRemoteCommandCenter.shared()
-        // The system may call these off the main thread, so each hops to the main actor.
-        commands.playCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.handlers.play() }
-            return .success
-        }
-        commands.pauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.handlers.pause() }
-            return .success
-        }
-        commands.togglePlayPauseCommand.addTarget { [weak self] _ in
-            Task { @MainActor in self?.handlers.toggle() }
-            return .success
-        }
+        commands.playCommand.addTarget(handler: Self.handler { [weak self] _ in self?.handlers.play() })
+        commands.pauseCommand.addTarget(handler: Self.handler { [weak self] _ in self?.handlers.pause() })
+        commands.togglePlayPauseCommand.addTarget(handler: Self.handler { [weak self] _ in self?.handlers.toggle() })
         commands.skipForwardCommand.preferredIntervals = [10]
-        commands.skipForwardCommand.addTarget { [weak self] event in
+        commands.skipForwardCommand.addTarget(handler: Self.handler { [weak self] event in
             let interval = (event as? MPSkipIntervalCommandEvent)?.interval ?? 10
-            Task { @MainActor in self?.handlers.skip(interval) }
-            return .success
-        }
+            self?.handlers.skip(interval)
+        })
         commands.skipBackwardCommand.preferredIntervals = [10]
-        commands.skipBackwardCommand.addTarget { [weak self] event in
+        commands.skipBackwardCommand.addTarget(handler: Self.handler { [weak self] event in
             let interval = (event as? MPSkipIntervalCommandEvent)?.interval ?? 10
-            Task { @MainActor in self?.handlers.skip(-interval) }
-            return .success
-        }
-        commands.changePlaybackPositionCommand.addTarget { [weak self] event in
-            guard let position = (event as? MPChangePlaybackPositionCommandEvent)?.positionTime else { return .commandFailed }
-            Task { @MainActor in self?.handlers.seek(position) }
+            self?.handlers.skip(-interval)
+        })
+        commands.changePlaybackPositionCommand.addTarget(handler: Self.handler { [weak self] event in
+            guard let position = (event as? MPChangePlaybackPositionCommandEvent)?.positionTime else { return }
+            self?.handlers.seek(position)
+        })
+    }
+
+    /// Wraps `action` for the system, which calls remote command handlers on an arbitrary queue.
+    /// The closure is created in a nonisolated function so it carries no actor isolation; `action`
+    /// runs on the main actor.
+    nonisolated static func handler(
+        _ action: @escaping @MainActor @Sendable (MPRemoteCommandEvent) -> Void
+    ) -> (MPRemoteCommandEvent) -> MPRemoteCommandHandlerStatus {
+        { event in
+            nonisolated(unsafe) let event = event
+            Task { @MainActor in action(event) }
             return .success
         }
     }
