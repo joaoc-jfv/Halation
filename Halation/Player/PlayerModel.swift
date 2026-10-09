@@ -21,9 +21,10 @@ final class PlayerModel {
     private(set) var rate: Float = 1
     private(set) var volume: Float = 1
     private(set) var isMuted = false
-    private(set) var audioOutputMode: AudioOutputMode = .spatial
+    private(set) var audioOutputMode: AudioOutputMode
 
     // UI-only state
+    private(set) var activePanel: PlayerPanel?
     private(set) var controlsVisible = true
     private(set) var isPointerOverControls = false
     private(set) var toast: Toast?
@@ -34,6 +35,7 @@ final class PlayerModel {
         if case .failed(let error) = state { error.localizedDescription } else { nil }
     }
 
+    @ObservationIgnored private let preferences: Preferences
     @ObservationIgnored private var engine: (any PlaybackEngine)?
     @ObservationIgnored private var openTask: Task<Void, Never>?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
@@ -45,6 +47,11 @@ final class PlayerModel {
     /// How long the controls stay up without mouse or keyboard activity while playing.
     @ObservationIgnored var autoHideDelay: Duration = .seconds(2.5)
     @ObservationIgnored var toastDuration: Duration = .seconds(1.2)
+
+    init(preferences: Preferences = Preferences()) {
+        self.preferences = preferences
+        audioOutputMode = preferences.audioOutputMode
+    }
 
     // MARK: Opening
 
@@ -70,6 +77,7 @@ final class PlayerModel {
             attach(engine)
             try await engine.load(url, startAt: nil)
             try Task.checkCancellation()
+            applyTrackPreferences(to: engine)
             engine.play()
         } catch is CancellationError {
             // Superseded by another open().
@@ -128,13 +136,33 @@ final class PlayerModel {
         case .bufferingChanged(let buffering): isBuffering = buffering
         case .bufferedChanged(let end): buffered = end
         case .mediaInfoChanged(let info): mediaInfo = info
-        case .tracksChanged:
-            guard let engine else { return }
-            audioTracks = engine.audioTracks
-            subtitleTracks = engine.subtitleTracks
-            selectedAudio = engine.selectedAudioTrack
-            selectedSubtitle = engine.selectedSubtitleTrack
+        case .tracksChanged: refreshTracks()
         }
+    }
+
+    private func refreshTracks() {
+        guard let engine else { return }
+        audioTracks = engine.audioTracks
+        subtitleTracks = engine.subtitleTracks
+        selectedAudio = engine.selectedAudioTrack
+        selectedSubtitle = engine.selectedSubtitleTrack
+    }
+
+    /// Applies the remembered audio and subtitle languages to a freshly loaded file.
+    private func applyTrackPreferences(to engine: any PlaybackEngine) {
+        if let audio = TrackSelectionPolicy.audio(from: engine.audioTracks, preferredLanguage: preferences.audioLanguage),
+           audio != engine.selectedAudioTrack {
+            engine.selectAudio(audio)
+        }
+        let decision = TrackSelectionPolicy.subtitle(
+            from: engine.subtitleTracks,
+            choice: preferences.subtitleChoice,
+            audioLanguage: engine.selectedAudioTrack?.language
+        )
+        if case .select(let track) = decision, track != engine.selectedSubtitleTrack {
+            engine.selectSubtitle(track)
+        }
+        refreshTracks()
     }
 
     // MARK: Transport
@@ -163,7 +191,7 @@ final class PlayerModel {
 
     // MARK: Controls visibility
 
-    private var shouldKeepControlsVisible: Bool { !isPlaying || isPointerOverControls }
+    private var shouldKeepControlsVisible: Bool { !isPlaying || isPointerOverControls || activePanel != nil }
 
     /// Call on mouse movement or any key. Shows the controls and restarts the auto-hide countdown.
     func registerActivity() {
@@ -199,6 +227,19 @@ final class PlayerModel {
         hideTask = nil
     }
 
+    // MARK: Panels
+
+    func togglePanel(_ panel: PlayerPanel) {
+        activePanel = activePanel == panel ? nil : panel
+        registerActivity()
+    }
+
+    func closePanel() {
+        guard activePanel != nil else { return }
+        activePanel = nil
+        registerActivity()
+    }
+
     // MARK: Toasts
 
     func showToast(_ text: String, symbol: String? = nil) {
@@ -230,14 +271,39 @@ final class PlayerModel {
 
     func setAudioOutputMode(_ mode: AudioOutputMode) {
         audioOutputMode = mode
+        preferences.audioOutputMode = mode
         engine?.audioOutputMode = mode
     }
 
+    /// Subtitle tracks the user can pick. Forced-only tracks are chosen automatically, not listed.
+    var selectableSubtitleTracks: [MediaTrack] { subtitleTracks.filter { !$0.isForced } }
+
+    /// The selected subtitle track as the user sees it: a forced-only track counts as Off.
+    var displayedSubtitle: MediaTrack? { selectedSubtitle.flatMap { $0.isForced ? nil : $0 } }
+
+    /// Switches audio track mid-playback and remembers its language for the next file.
     func selectAudio(_ track: MediaTrack?) {
         engine?.selectAudio(track)
+        refreshTracks()
+        if let language = track?.language { preferences.audioLanguage = language }
     }
 
+    /// `nil` turns subtitles off (a forced track in the audio language still shows). The choice is remembered.
     func selectSubtitle(_ track: MediaTrack?) {
-        engine?.selectSubtitle(track)
+        if let track {
+            engine?.selectSubtitle(track)
+            if let language = track.language { preferences.subtitleChoice = .language(language) }
+        } else {
+            let forced = TrackSelectionPolicy.subtitle(
+                from: subtitleTracks, choice: .off, audioLanguage: selectedAudio?.language
+            )
+            if case .select(let forcedTrack) = forced { engine?.selectSubtitle(forcedTrack) }
+            preferences.subtitleChoice = .off
+        }
+        refreshTracks()
     }
+}
+
+enum PlayerPanel: Equatable {
+    case audioSubtitles
 }

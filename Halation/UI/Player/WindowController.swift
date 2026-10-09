@@ -25,6 +25,11 @@ final class WindowController {
         }
     }
 
+    func exitFullScreen() {
+        guard let window, window.styleMask.contains(.fullScreen) else { return }
+        window.toggleFullScreen(nil)
+    }
+
     func toggleFullScreen() {
         window?.toggleFullScreen(nil)
     }

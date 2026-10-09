@@ -55,19 +55,20 @@ extension PlayerModel {
         let index = selectedAudio.flatMap { audioTracks.firstIndex(of: $0) } ?? -1
         let next = audioTracks[(index + 1) % audioTracks.count]
         selectAudio(next)
-        showToast("Audio: \(next.displayName)", symbol: "speaker.wave.2")
+        showToast("Audio: \(next.summary)", symbol: "speaker.wave.2")
     }
 
     /// Cycles Off → first track → … → last track → Off.
     func cycleSubtitlesByShortcut() {
         registerActivity()
-        guard !subtitleTracks.isEmpty else {
+        let tracks = selectableSubtitleTracks
+        guard !tracks.isEmpty else {
             showToast("No subtitles", symbol: "captions.bubble")
             return
         }
-        let next: MediaTrack? = switch selectedSubtitle.flatMap({ subtitleTracks.firstIndex(of: $0) }) {
-        case nil: subtitleTracks[0]
-        case let index? where index + 1 < subtitleTracks.count: subtitleTracks[index + 1]
+        let next: MediaTrack? = switch displayedSubtitle.flatMap({ tracks.firstIndex(of: $0) }) {
+        case nil: tracks[0]
+        case let index? where index + 1 < tracks.count: tracks[index + 1]
         default: nil
         }
         selectSubtitle(next)

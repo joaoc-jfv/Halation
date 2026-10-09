@@ -56,6 +56,7 @@ final class AVFoundationEngine: PlaybackEngine {
         let info: MediaInfo
         let audio: AVMediaSelectionGroup?
         let subtitles: AVMediaSelectionGroup?
+        let audioTracks: [MediaTrack]
         let duration: CMTime
         do {
             let (isPlayable, loadedDuration) = try await asset.load(.isPlayable, .duration)
@@ -63,6 +64,7 @@ final class AVFoundationEngine: PlaybackEngine {
             info = try await Self.makeMediaInfo(for: asset, url: url)
             audio = try await asset.loadMediaSelectionGroup(for: .audible)
             subtitles = try await asset.loadMediaSelectionGroup(for: .legible)
+            audioTracks = try await AVTrackMapping.audioTracks(in: audio, asset: asset)
             duration = loadedDuration
         } catch {
             guard generation == loadGeneration else { throw CancellationError() }
@@ -77,12 +79,14 @@ final class AVFoundationEngine: PlaybackEngine {
         self.item = item
         audioGroup = audio
         subtitleGroup = subtitles
+        self.audioTracks = audioTracks
+        subtitleTracks = AVTrackMapping.tracks(in: subtitles, kind: .subtitle)
         applyAudioOutputMode()
         attach(item)
 
         if let duration = Duration(duration) { emit(.durationChanged(duration)) }
         emit(.mediaInfoChanged(info))
-        refreshTracks()
+        emit(.tracksChanged)
         player.replaceCurrentItem(with: item)
         refreshState()
         refreshBuffered()
@@ -177,12 +181,6 @@ final class AVFoundationEngine: PlaybackEngine {
         } else {
             item.select(nil, in: group)
         }
-        emit(.tracksChanged)
-    }
-
-    private func refreshTracks() {
-        audioTracks = AVTrackMapping.tracks(in: audioGroup, kind: .audio)
-        subtitleTracks = AVTrackMapping.tracks(in: subtitleGroup, kind: .subtitle)
         emit(.tracksChanged)
     }
 

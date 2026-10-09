@@ -4,6 +4,7 @@ struct PlayerWindowView: View {
     @Environment(PlayerModel.self) private var player
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var windowController = WindowController()
+    @FocusState private var isFocused: Bool
 
     private var showsControls: Bool { player.hasMedia && player.errorMessage == nil }
 
@@ -17,6 +18,10 @@ struct PlayerWindowView: View {
                 EmptyStateView()
             }
             if showsControls {
+                if player.activePanel != nil {
+                    // Click anywhere outside the panel to dismiss it.
+                    Color.clear.contentShape(Rectangle()).onTapGesture { player.closePanel() }
+                }
                 controls
             }
             toast
@@ -25,6 +30,18 @@ struct PlayerWindowView: View {
         .background(WindowAccessor { windowController.configure($0) })
         .onChange(of: player.mediaInfo?.resolution) { _, size in
             if let size { windowController.fit(toVideoSize: size) }
+        }
+        .focusable()
+        .focusEffectDisabled()
+        .focused($isFocused)
+        .onAppear { isFocused = true }
+        // Esc closes an open panel first, and otherwise leaves full screen as usual.
+        .onExitCommand {
+            if player.activePanel != nil {
+                player.closePanel()
+            } else {
+                windowController.exitFullScreen()
+            }
         }
         .onContinuousHover { phase in
             if case .active = phase { player.registerActivity() }
@@ -48,8 +65,12 @@ struct PlayerWindowView: View {
                 .frame(height: 140)
                 .frame(maxHeight: .infinity, alignment: .bottom)
                 .allowsHitTesting(false)
-            ControlBar { windowController.toggleFullScreen() }
+            ControlsOverlay { windowController.toggleFullScreen() }
                 .frame(maxHeight: .infinity, alignment: .bottom)
+            FormatBadges()
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                .padding(.top, 24)
+                .padding(.trailing, 20)
         }
         .opacity(player.controlsVisible ? 1 : 0)
         .allowsHitTesting(player.controlsVisible)
@@ -86,5 +107,31 @@ private struct EmptyStateView: View {
         .padding(.horizontal, 28)
         .padding(.vertical, 20)
         .glassEffect(.regular, in: .rect(cornerRadius: 24))
+    }
+}
+
+/// The control bar and the panel that grows out of it, in one glass container so they morph.
+private struct ControlsOverlay: View {
+    @Environment(PlayerModel.self) private var player
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Namespace private var glassNamespace
+    var onToggleFullScreen: () -> Void
+
+    var body: some View {
+        GlassEffectContainer(spacing: 24) {
+            VStack(spacing: 12) {
+                if player.activePanel == .audioSubtitles {
+                    TrackPanel()
+                        .glassEffectID("panel", in: glassNamespace)
+                        .glassEffectTransition(.matchedGeometry)
+                }
+                ControlBar(namespace: glassNamespace, onToggleFullScreen: onToggleFullScreen)
+            }
+        }
+        .frame(maxWidth: 720)
+        .padding(.horizontal, 20)
+        .padding(.bottom, 20)
+        .onHover { player.setPointerOverControls($0) }
+        .animation(reduceMotion ? nil : .smooth(duration: 0.3), value: player.activePanel)
     }
 }

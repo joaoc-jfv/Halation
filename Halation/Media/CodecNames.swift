@@ -21,6 +21,6 @@ enum CodecNames {
         "hvc1": "HEVC", "hev1": "HEVC", "dvh1": "HEVC", "dvhe": "HEVC",
         "av01": "AV1", "vp09": "VP9", "mp4v": "MPEG-4",
         "apch": "ProRes", "apcn": "ProRes", "apcs": "ProRes", "apco": "ProRes", "ap4h": "ProRes", "ap4x": "ProRes",
-        "mp4a": "AAC", "ac-3": "AC-3", "ec-3": "E-AC-3", "alac": "ALAC", "fLaC": "FLAC", "Opus": "Opus", "lpcm": "PCM",
+        "mp4a": "AAC", "aac ": "AAC", "aach": "HE-AAC", "aacp": "HE-AAC", ".mp3": "MP3", "ac-3": "AC-3", "ec-3": "E-AC-3", "alac": "ALAC", "fLaC": "FLAC", "Opus": "Opus", "lpcm": "PCM",
     ]
 }

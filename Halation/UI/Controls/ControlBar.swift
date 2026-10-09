@@ -1,12 +1,12 @@
 import SwiftUI
 
-/// Floating Liquid Glass control bar (PLAN.md §6). Audio & Subtitles, crop and PiP buttons
-/// arrive with milestones 1.5, 1.7 and 1.8.
+/// Floating Liquid Glass control bar (PLAN.md §6). Crop and PiP buttons arrive with milestones 1.7 and 1.8.
 struct ControlBar: View {
     @Environment(PlayerModel.self) private var player
     @AppStorage("timeLabelShowsTotal") private var showsTotal = false
     @State private var scrubFraction: Double?
     @State private var volumeDrag: Double?
+    let namespace: Namespace.ID
     var onToggleFullScreen: () -> Void
 
     private var durationSeconds: Double { player.duration.seconds }
@@ -15,30 +15,30 @@ struct ControlBar: View {
     }
 
     var body: some View {
-        GlassEffectContainer {
-            HStack(spacing: 10) {
-                transportButtons
-                timeLabel(elapsed.clockString)
-                scrubber
-                Button { showsTotal.toggle() } label: {
-                    timeLabel(showsTotal ? player.duration.clockString : "−" + (player.duration - elapsed).clockString)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(showsTotal ? "Total time" : "Time remaining")
-                .accessibilityValue(showsTotal ? player.duration.clockString : (player.duration - elapsed).clockString)
-                .accessibilityHint("Switches between total and remaining time")
-                volume
-                speedMenu
-                ControlButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Full Screen", action: onToggleFullScreen)
+        HStack(spacing: 10) {
+            transportButtons
+            timeLabel(elapsed.clockString)
+            scrubber
+            Button { showsTotal.toggle() } label: {
+                timeLabel(showsTotal ? player.duration.clockString : "−" + (player.duration - elapsed).clockString)
             }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .glassEffect(.regular.interactive(), in: .capsule)
+            .buttonStyle(.plain)
+            .accessibilityLabel(showsTotal ? "Total time" : "Time remaining")
+            .accessibilityValue(showsTotal ? player.duration.clockString : (player.duration - elapsed).clockString)
+            .accessibilityHint("Switches between total and remaining time")
+            volume
+            ControlButton(
+                symbol: "captions.bubble",
+                label: "Audio and Subtitles",
+                isActive: player.activePanel == .audioSubtitles
+            ) { player.togglePanel(.audioSubtitles) }
+            speedMenu
+            ControlButton(symbol: "arrow.up.left.and.arrow.down.right", label: "Full Screen", action: onToggleFullScreen)
         }
-        .frame(maxWidth: 720)
-        .padding(.horizontal, 20)
-        .padding(.bottom, 20)
-        .onHover { player.setPointerOverControls($0) }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .glassEffect(.regular.tint(.black.opacity(0.3)).interactive(), in: .capsule)
+        .glassEffectID("bar", in: namespace)
     }
 
     private var transportButtons: some View {
@@ -112,6 +112,7 @@ struct ControlBar: View {
 struct ControlButton: View {
     let symbol: String
     let label: LocalizedStringKey
+    var isActive = false
     let action: () -> Void
 
     var body: some View {
@@ -120,9 +121,11 @@ struct ControlButton: View {
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white)
                 .frame(width: 30, height: 30)
+                .background(.white.opacity(isActive ? 0.25 : 0), in: .circle)
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel(label)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }

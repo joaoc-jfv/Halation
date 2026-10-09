@@ -16,6 +16,9 @@ struct AppCommands: Commands {
         CommandGroup(after: .toolbar) {
             Button("Toggle Full Screen") { NSApp.keyWindow?.toggleFullScreen(nil) }
                 .keyboardShortcut("f", modifiers: [])
+            // Esc itself is handled by the player view (it must also leave full screen).
+            Button("Close Panel") { player.closePanel() }
+                .disabled(player.activePanel == nil)
         }
 
         CommandMenu("Playback") {
@@ -58,6 +61,23 @@ struct AppCommands: Commands {
                 Divider()
                 Button("Next Audio Track") { player.cycleAudioByShortcut() }
                     .keyboardShortcut("a", modifiers: [])
+                Menu("Audio Track") {
+                    ForEach(player.audioTracks) { track in
+                        Toggle(track.summary, isOn: Binding(
+                            get: { track == player.selectedAudio },
+                            set: { _ in player.selectAudio(track) }
+                        ))
+                    }
+                }
+                .disabled(player.audioTracks.isEmpty)
+                Picker("Output", selection: Binding(
+                    get: { player.audioOutputMode },
+                    set: { player.setAudioOutputMode($0) }
+                )) {
+                    Text("Spatial Audio").tag(AudioOutputMode.spatial)
+                    Text("Stereo").tag(AudioOutputMode.stereo)
+                }
+                .pickerStyle(.inline)
             }
             .disabled(!player.hasMedia)
         }
@@ -66,6 +86,18 @@ struct AppCommands: Commands {
             Group {
                 Button("Next Subtitle Track") { player.cycleSubtitlesByShortcut() }
                     .keyboardShortcut("s", modifiers: [])
+                Menu("Subtitle Track") {
+                    Toggle("Off", isOn: Binding(
+                        get: { player.displayedSubtitle == nil },
+                        set: { _ in player.selectSubtitle(nil) }
+                    ))
+                    ForEach(player.selectableSubtitleTracks) { track in
+                        Toggle(track.displayName, isOn: Binding(
+                            get: { track == player.displayedSubtitle },
+                            set: { _ in player.selectSubtitle(track) }
+                        ))
+                    }
+                }
             }
             .disabled(!player.hasMedia)
         }

@@ -45,7 +45,7 @@ import Testing
 
     private func playing(seconds: Int = 20) async throws -> (PlayerModel, URL) {
         let url = try await TestVideo.make(seconds: seconds)
-        let player = PlayerModel()
+        let player = PlayerModel(preferences: TestPreferences.make())
         player.autoHideDelay = .milliseconds(150)
         player.open(url)
         await wait("playback to start") { player.state == .playing }
@@ -98,7 +98,7 @@ import Testing
     }
 
     @Test func toastsAppearAndExpire() async {
-        let player = PlayerModel()
+        let player = PlayerModel(preferences: TestPreferences.make())
         player.toastDuration = .milliseconds(80)
         player.showToast("Hello", symbol: "star")
         #expect(player.toast?.text == "Hello")
@@ -106,7 +106,7 @@ import Testing
     }
 
     @Test func newToastReplacesTheOldOne() async throws {
-        let player = PlayerModel()
+        let player = PlayerModel(preferences: TestPreferences.make())
         player.toastDuration = .milliseconds(200)
         player.showToast("One")
         let first = player.toast?.id
@@ -118,7 +118,7 @@ import Testing
     }
 
     @Test func volumeShortcutsStepAndToast() {
-        let player = PlayerModel()
+        let player = PlayerModel(preferences: TestPreferences.make())
         player.setVolume(0.5)
         player.adjustVolumeByShortcut(by: 0.05)
         #expect(player.volume == 0.55)
@@ -131,7 +131,7 @@ import Testing
     }
 
     @Test func raisingVolumeUnmutes() {
-        let player = PlayerModel()
+        let player = PlayerModel(preferences: TestPreferences.make())
         player.toggleMuteByShortcut()
         #expect(player.isMuted)
         #expect(player.toast?.text == "Muted")
@@ -140,7 +140,7 @@ import Testing
     }
 
     @Test func speedShortcutsUseTheLadder() {
-        let player = PlayerModel()
+        let player = PlayerModel(preferences: TestPreferences.make())
         player.stepSpeedByShortcut(up: true)
         #expect(player.rate == 1.25)
         #expect(player.toast?.text == "Speed 1.25×")
@@ -151,7 +151,7 @@ import Testing
     }
 
     @Test func trackCyclingExplainsWhenThereAreNoTracks() {
-        let player = PlayerModel()
+        let player = PlayerModel(preferences: TestPreferences.make())
         player.cycleSubtitlesByShortcut()
         #expect(player.toast?.text == "No subtitles")
         player.cycleAudioByShortcut()

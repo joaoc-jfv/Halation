@@ -3,7 +3,7 @@
 > **Halation** (n.): the soft glow that forms around bright highlights on film.
 > A free macOS video player built for HDR highlights, spatial audio, and a Liquid Glass interface.
 
-This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core), 1.3 (video surface and window) and 1.4 (Liquid Glass controls) are done; see §7 for the order of the rest.
+This document is the full build plan. It is written so that an engineer (or another model) can implement it phase by phase without needing the conversation that produced it. **Status:** milestones 1.1 (project skeleton), 1.2 (engine core), 1.3 (video surface and window), 1.4 (Liquid Glass controls) and 1.5 (tracks) are done; see §7 for the order of the rest.
 
 ---
 
@@ -143,13 +143,13 @@ Halation/
 │   │   ├── AVFoundation/   AVFoundationEngine.swift, AVTrackMapping.swift, PlayerLayerView.swift
 │   │   ├── Remux/          (phase 2)
 │   │   └── MPV/            (phase 3)
-│   ├── Media/          CodecNames.swift, MediaProbe.swift, HDRDetection.swift, AudioFormatDetection.swift
-│   ├── Player/         PlayerModel.swift, PlayerModel+Shortcuts.swift, PlaybackSpeed.swift, Toast.swift, TimeFormatting.swift
+│   ├── Media/          CodecNames.swift, LanguageMatching.swift, MediaProbe.swift, HDRDetection.swift, AudioFormatDetection.swift
+│   ├── Player/         PlayerModel.swift, PlayerModel+Shortcuts.swift, TrackSelectionPolicy.swift, MediaTrack+Labels.swift, PlaybackSpeed.swift, Toast.swift, TimeFormatting.swift
 │   ├── Subtitles/      SubtitleCue.swift, SRTParser.swift, WebVTTParser.swift, SubtitleTrackStore.swift
 │   ├── UI/
 │   │   ├── Player/     PlayerWindowView.swift, VideoSurfaceView.swift, WindowController.swift, WindowSizing.swift, OpenPanel.swift, SubtitleOverlay.swift
-│   │   ├── Controls/   ControlBar.swift, TrackSlider.swift (scrubber and volume), TrackPanel.swift, SpeedPanel.swift, CropPanel.swift, VolumeControl.swift
-│   │   ├── HUD/        InfoHUD.swift, FormatBadges.swift, OSDToast.swift
+│   │   ├── Controls/   ControlBar.swift, TrackSlider.swift (scrubber and volume), TrackPanel.swift, TrackPanel.swift, SpeedPanel.swift, CropPanel.swift, VolumeControl.swift
+│   │   ├── HUD/        InfoHUD.swift, FormatBadges.swift (Spatial Audio badge so far), OSDToast.swift
 │   │   └── Welcome/    WelcomeView.swift (drop zone + recents)
 │   ├── Services/       NowPlayingService.swift, ResumeStore.swift, RecentFiles.swift, Preferences.swift, PiPController.swift
 │   └── Resources/      Assets.xcassets, Info.plist, Halation.entitlements
@@ -171,7 +171,9 @@ Halation/
 ### 5.2 Spatial Audio
 - Set `AVPlayerItem.allowedAudioSpatializationFormats = .monoStereoAndMultichannel` when the output mode is **Spatial** (the default).
 - **Stereo** mode sets it to `[]` (no spatialization) for people who want a plain downmix.
-- Detect E-AC-3 JOC tracks: codec `ec-3`, plus the JOC flag in the `dec3` box extension (or a matching media characteristic if AVFoundation exposes one; *verify*). Mark those tracks `isSpatial = true` and show a **Spatial Audio** badge.
+- Detect E-AC-3 JOC tracks: codec `ec-3`, plus the JOC flag in the `dec3` box extension. The SDK has no media characteristic for it. `AudioFormatDetection` reads `flag_ec3_extension_type_a` and a non-zero `complexity_index_type_a` after the substreams (ETSI TS 102 366 Annex F.6), from the sample description atoms and, failing that, the magic cookie. It is tested against records built from the spec but **not yet against a real JOC file**, and which of the two sources CoreMedia fills is unconfirmed. Mark those tracks `isSpatial = true` and show a **Spatial Audio** badge.
+- - AVFoundation has no public link from a selection option to its audio track, so `AVTrackMapping.pair` matches them: by position when the counts and codecs agree, else by language and codec. Forced-only subtitle tracks are kept in the model (for the "Off" rule in §5.3) but hidden from the list and from `S`.
+- Remembered choices (`Preferences`): last audio language, subtitle choice (unset / off / language) and output mode. They are applied when a file opens (`TrackSelectionPolicy`), and changed only by the user's own picks.
 - The audio track list labels each track with its language, title, codec, and channels, plus "Spatial" where it applies (for example "English · 5.1 · Spatial").
 - Head tracking is controlled by the system (Control Center), not the app. Don't build a toggle for it.
 
@@ -245,7 +247,7 @@ All shortcuts also appear in the menu bar (Playback, Audio, Subtitles, Video men
 **Principle:** the video is the content and glass is the chrome. Controls float over the video and disappear when not needed.
 
 - **Window:** `.windowStyle(.hiddenTitleBar)`, full-size content view, the video fills the window edge to edge. Traffic lights float over the video and fade with the controls. The window resizes to the video's aspect ratio when a file opens: native size, at least 640 pt wide, capped to 80% of the screen (`WindowSizing`). It is not aspect-locked afterwards. Black window background.
-- **Control bar:** a floating capsule, bottom-center, inset 20 pt from the bottom, max width ~720 pt. Uses `.glassEffect(.regular.interactive(), in: .capsule)` inside a `GlassEffectContainer` so panels can **morph out of the bar** (shortcuts are menu key equivalents with no modifier, so they win over a focused slider; auto-hide runs in `PlayerModel`, which restarts nothing on mouse movement and just moves a last-activity timestamp) (with `glassEffectID` and a `@Namespace`).
+- **Control bar:** a floating capsule, bottom-center, inset 20 pt from the bottom, max width ~720 pt. Uses `.glassEffect(.regular.tint(.black.opacity(0.3)).interactive(), in: .capsule)` (the dark tint keeps white controls readable over bright video; the track panel uses a 0.4 tint) inside a `GlassEffectContainer` so panels can **morph out of the bar** (shortcuts are menu key equivalents with no modifier, so they win over a focused slider; auto-hide runs in `PlayerModel`, which restarts nothing on mouse movement and just moves a last-activity timestamp) (with `glassEffectID` and a `@Namespace`).
   - Left: play/pause, −10 s, +10 s.
   - Center: elapsed time · scrubber (buffered range, chapter ticks, hover thumbnail) · remaining time (click to toggle total).
   - Right: volume, **Audio & Subtitles** (one button, one panel with two columns like the Apple TV app), speed, crop/aspect, PiP, full screen.
@@ -334,7 +336,7 @@ Each milestone ends with a working, runnable app. Commit at the end of each mile
 ## 9. Risks and open questions
 
 1. **MKV → HLS remuxing (phase 2)** is complex. Spike it early, and consider pulling a minimal spike forward right after milestone 1.3.
-2. **E-AC-3 JOC detection API:** confirm the cleanest way to read the JOC flag, from the `dec3` box or a media characteristic.
+2. **E-AC-3 JOC detection API:** no media characteristic exists, so the `dec3` parser (milestone 1.5) is the approach. Confirm it against a real JOC file and see which of the sample description atom or the magic cookie CoreMedia fills.
 3. **Audio fallback codec inside fMP4 HLS** for TrueHD/DTS: test which multichannel formats AVPlayer accepts.
 4. **MPVKit** packaging and licensing: confirm it's maintained and that an LGPL build is available.
 5. **"Dolby Vision" naming in the UI:** same trademark concern as Atmos. Options: keep "Dolby Vision" (descriptive, commonly done) or use a neutral badge like "DV" / "HDR · Vision". **Decision needed** before milestone 1.9.
